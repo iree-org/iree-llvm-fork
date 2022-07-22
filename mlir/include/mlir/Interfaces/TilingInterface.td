@@ -161,6 +161,26 @@ def TilingInterface : OpInterface<"TilingInterface"> {
         /*defaultImplementation=*/[{
           return failure();
         }]
+      >,
+      InterfaceMethod<
+        /*desc=*/[{
+          Generates the scalar implementation of the operation. Assuming that all
+          the loops as specified by `getIterationDomain` are created and the
+          insertion point is set to the innermost of the loop body (which is empty),
+          this method implements the loop body.
+          This method can be viewed as a way to "exit" out after all transformations
+          on an op (or tiled version of the op) have been done.
+        }],
+        /*retType=*/"LogicalResult",
+        /*methodName=*/"generateScalarImplementation",
+        /*args=*/(ins
+            "OpBuilder &":$b,
+            "Location ":$loc,
+            "ValueRange ":$ivs),
+        /*methodBody=*/"",
+        /*defaultImplementation=*/[{
+          return failure();
+        }]
       >
   ];  
 }
