@@ -719,27 +719,6 @@ LogicalResult mlir::linalg::detail::verifyStructuredOpInterface(Operation *op) {
              << ")";
   }
 
-  // Output tensor indexing map may not depend on reduction indices.
-  for (OpOperand *opOperand : linalgOp.getOutputOperands()) {
-    AffineMap indexingMap = linalgOp.getTiedIndexingMap(opOperand);
-    for (AffineExpr expr : indexingMap.getResults()) {
-      for (unsigned pos : redDims) {
-        if (expr.isFunctionOfDim(pos)) {
-          std::string exprStr;
-          {
-            llvm::raw_string_ostream os(exprStr);
-            os << expr;
-          }
-          return op->emitOpError(
-                     "unexpected output tensor expression in indexing map #")
-                 << (opOperand->getOperandNumber() - linalgOp.getNumInputs())
-                 << " a.k.a '" << exprStr
-                 << "' is function of reduction iterator 'd" << pos << "'";
-        }
-      }
-    }
-  }
-
   // Check the region has exactly one block.
   if (linalgOp->getNumRegions() != 1 ||
       !llvm::hasSingleElement(linalgOp->getRegion(0)))
