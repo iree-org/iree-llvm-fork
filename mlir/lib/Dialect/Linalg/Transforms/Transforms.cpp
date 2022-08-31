@@ -604,7 +604,7 @@ mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
 
 LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
     LinalgOp linalgOp, PatternRewriter &rewriter) const {
-    FailureOr<linalg::LinalgOp> result =
+    return
         splitReduction(rewriter, linalgOp, 
         [this](linalg::LinalgOp linalgOp) -> std::pair<int64_t, unsigned> {
           SmallVector<unsigned> dims;
@@ -614,8 +614,8 @@ LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
           }
           return std::make_pair(options.splitRatio, dims[0]);
         }, filter);
-    if (failed(result)) return failure();
-    return success();
+    //if (failed(result)) return failure();
+    //return success();
 }
 
 mlir::linalg::LinalgVectorizationPattern::LinalgVectorizationPattern(
