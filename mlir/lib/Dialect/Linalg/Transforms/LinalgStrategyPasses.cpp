@@ -218,16 +218,16 @@ struct LinalgStrategySplitReductionPass
     if (!anchorFuncName.empty() && funcOp.getName() != anchorFuncName)
       return;
 
-    RewritePatternSet peelingPatterns(funcOp.getContext());
+    RewritePatternSet patterns(funcOp.getContext());
     if (!anchorOpName.empty()) {
-      peelingPatterns.add<LinalgSplitReductionPattern>(
+      patterns.add<LinalgSplitReductionPattern>(
           anchorOpName, funcOp.getContext(), options, filter);
     } else {
-      peelingPatterns.add<LinalgSplitReductionPattern>(funcOp.getContext(), filter,
+      patterns.add<LinalgSplitReductionPattern>(funcOp.getContext(), filter,
                                                 options);
     }
     if (failed(
-            applyPatternsAndFoldGreedily(funcOp, std::move(peelingPatterns))))
+            applyPatternsAndFoldGreedily(funcOp, std::move(patterns))))
       return signalPassFailure();
   }
 
