@@ -110,6 +110,13 @@ std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyPeelPass(
     const linalg::LinalgTransformationFilter &filter =
         linalg::LinalgTransformationFilter());
 
+/// Create a LinalgStrategySplitReductionPass.
+std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategySplitReductionPass(
+    StringRef opName = "",
+    const linalg::LinalgSplitReductionOptions &opt = linalg::LinalgSplitReductionOptions(),
+    const linalg::LinalgTransformationFilter &filter =
+        linalg::LinalgTransformationFilter());
+
 /// Create a LinalgStrategyVectorizePass.
 std::unique_ptr<OperationPass<func::FuncOp>> createLinalgStrategyVectorizePass(
     StringRef opName = "",

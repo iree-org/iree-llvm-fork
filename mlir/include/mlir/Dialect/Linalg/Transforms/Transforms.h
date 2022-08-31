@@ -917,6 +917,40 @@ private:
 };
 
 ///
+/// Linalg splitReduction patterns.
+///
+/// Contains the ratio to split the reduction dimension into a parallel dimension.
+struct LinalgSplitReductionOptions {
+  int64_t splitRatio;
+};
+
+/// `filter` controls LinalgTransformMarker matching and update when specified.
+struct LinalgSplitReductionPattern : public OpInterfaceRewritePattern<LinalgOp> {
+  /// Construct a generic pattern applied to all LinalgOp that verify `filter`.
+  LinalgSplitReductionPattern(
+      MLIRContext *context,
+      LinalgTransformationFilter f = LinalgTransformationFilter(),
+      LinalgSplitReductionOptions options = LinalgSplitReductionOptions(),
+      PatternBenefit benefit = 1);
+
+  /// Construct a pattern specifically applied to `opName`.
+  LinalgSplitReductionPattern(
+      StringRef opName, MLIRContext *context,
+      LinalgSplitReductionOptions options = LinalgSplitReductionOptions(),
+      LinalgTransformationFilter f = LinalgTransformationFilter(),
+      PatternBenefit benefit = 1);
+
+  LogicalResult matchAndRewrite(LinalgOp linalgOp,
+                                PatternRewriter &rewriter) const override;
+
+private:
+  /// LinalgTransformMarker handles special attribute manipulations.
+  const LinalgTransformationFilter filter;
+  /// SplitReduction options.
+  const LinalgSplitReductionOptions options;
+};
+
+///
 /// Linalg vectorization patterns.
 ///
 /// Empty for now, used for SFINAE purposes only.

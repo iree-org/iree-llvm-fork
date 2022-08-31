@@ -112,6 +112,26 @@ private:
   linalg::LinalgPeelOptions options;
 };
 
+/// Represent one application of createLinalgStrategySplitReductionPass.
+struct SplitReduce : public Transformation {
+  explicit SplitReduce(linalg::LinalgSplitReductionOptions options,
+                LinalgTransformationFilter::FilterFunction f = nullptr)
+      : Transformation(std::move(f)), options(options) {}
+
+  SplitReduce(StringRef name, linalg::LinalgSplitReductionOptions options,
+       LinalgTransformationFilter::FilterFunction f = nullptr)
+      : Transformation(std::move(f)), opName(name), options(options) {}
+
+  void addToPassPipeline(OpPassManager &pm,
+                         LinalgTransformationFilter m) const override {
+    pm.addPass(createLinalgStrategySplitReductionPass(opName, options, m));
+  }
+
+private:
+  std::string opName;
+  linalg::LinalgSplitReductionOptions options;
+};
+
 /// Represent one application of createLinalgStrategyVectorizePass.
 struct Vectorize : public Transformation {
   explicit Vectorize(linalg::LinalgVectorizationOptions options,
@@ -228,6 +248,21 @@ struct CodegenStrategy {
   peelIf(bool b, StringRef opName, const LinalgPeelOptions &options,
          LinalgTransformationFilter::FilterFunction f = nullptr) {
     return b ? peel(opName, options, std::move(f)) : *this;
+  }
+  /// Append a pattern for splitReduction
+  CodegenStrategy &
+  splitReduce(StringRef opName, const LinalgSplitReductionOptions &options,
+       const LinalgTransformationFilter::FilterFunction &f = nullptr) {
+    transformationSequence.emplace_back(
+        std::make_unique<SplitReduce>(opName, options, f));
+    return *this;
+  }
+  /// Conditionally append a pattern for splitReduction
+  CodegenStrategy &
+  splitReduceIf(bool b, StringRef opName,
+                const LinalgSplitReductionOptions &options,
+         LinalgTransformationFilter::FilterFunction f = nullptr) {
+    return b ? splitReduce(opName, options, std::move(f)) : *this;
   }
   /// Append a pattern to rewrite `LinalgOpType` as a vector operation.
   CodegenStrategy &

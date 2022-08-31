@@ -590,6 +590,34 @@ LogicalResult mlir::linalg::LinalgPeelingPattern::matchAndRewrite(
   return success();
 }
 
+mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
+    MLIRContext *context, LinalgTransformationFilter f,
+    LinalgSplitReductionOptions options, PatternBenefit benefit)
+    : OpInterfaceRewritePattern<LinalgOp>(context, benefit),
+      filter(std::move(f)), options(std::move(options)) {}
+
+mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
+    StringRef opName, MLIRContext *context, LinalgSplitReductionOptions options,
+    LinalgTransformationFilter f, PatternBenefit benefit)
+    : OpInterfaceRewritePattern<LinalgOp>(context, benefit),
+      filter(f.addOpNameFilter(opName)), options(std::move(options)) {}
+
+LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
+    LinalgOp linalgOp, PatternRewriter &rewriter) const {
+    FailureOr<linalg::LinalgOp> result =
+        splitReduction(rewriter, linalgOp, 
+        [this](linalg::LinalgOp linalgOp) -> std::pair<int64_t, unsigned> {
+          SmallVector<unsigned> dims;
+          linalgOp.getReductionDims(dims);
+          if (dims.size() != 1) {
+            return std::make_pair(0, 0);
+          }
+          return std::make_pair(options.splitRatio, dims[0]);
+        }, filter);
+    if (failed(result)) return failure();
+    return success();
+}
+
 mlir::linalg::LinalgVectorizationPattern::LinalgVectorizationPattern(
     MLIRContext *context, LinalgTransformationFilter f,
     LinalgVectorizationOptions options, PatternBenefit benefit)

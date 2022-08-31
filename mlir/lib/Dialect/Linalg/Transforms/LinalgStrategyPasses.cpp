@@ -429,6 +429,14 @@ mlir::createLinalgStrategyPeelPass(StringRef opName,
   return std::make_unique<LinalgStrategyPeelPass>(opName, opt, filter);
 }
 
+/// Create a LinalgStrategySplitReductionPass.
+std::unique_ptr<OperationPass<func::FuncOp>>
+mlir::createLinalgStrategySplitReductionPass(StringRef opName,
+                                   const LinalgSplitReductionOptions &opt,
+                                   const LinalgTransformationFilter &filter) {
+  return std::make_unique<LinalgStrategySplitReductionPass>(opName, opt, filter);
+}
+
 /// Create a LinalgStrategyVectorizePass.
 std::unique_ptr<OperationPass<func::FuncOp>>
 mlir::createLinalgStrategyVectorizePass(
