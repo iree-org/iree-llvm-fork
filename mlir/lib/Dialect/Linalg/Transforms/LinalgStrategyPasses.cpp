@@ -201,6 +201,40 @@ struct LinalgStrategyPeelPass
   LinalgTransformationFilter filter;
 };
 
+/// Configurable pass to apply pattern-based linalg split reduction.
+struct LinalgStrategySplitReductionPass
+    : public LinalgStrategySplitReductionPassBase<LinalgStrategySplitReductionPass> {
+
+  LinalgStrategySplitReductionPass() = default;
+
+  LinalgStrategySplitReductionPass(StringRef opName, LinalgSplitReductionOptions opt,
+                         LinalgTransformationFilter filt)
+      : options(std::move(opt)), filter(std::move(filt)) {
+    this->anchorOpName.setValue(opName.str());
+  }
+
+  void runOnOperation() override {
+    auto funcOp = getOperation();
+    if (!anchorFuncName.empty() && funcOp.getName() != anchorFuncName)
+      return;
+
+    RewritePatternSet peelingPatterns(funcOp.getContext());
+    if (!anchorOpName.empty()) {
+      peelingPatterns.add<LinalgSplitReductionPattern>(
+          anchorOpName, funcOp.getContext(), options, filter);
+    } else {
+      peelingPatterns.add<LinalgSplitReductionPattern>(funcOp.getContext(), filter,
+                                                options);
+    }
+    if (failed(
+            applyPatternsAndFoldGreedily(funcOp, std::move(peelingPatterns))))
+      return signalPassFailure();
+  }
+
+  LinalgSplitReductionOptions options;
+  LinalgTransformationFilter filter;
+};
+
 /// Configurable pass to apply pattern-based linalg vectorization.
 struct LinalgStrategyVectorizePass
     : public LinalgStrategyVectorizePassBase<LinalgStrategyVectorizePass> {

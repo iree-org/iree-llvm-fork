@@ -238,6 +238,22 @@ def LinalgStrategyPeelPass
   ];
 }
 
+def LinalgStrategySplitReductionPass
+    : Pass<"linalg-strategy-splitReduction-pass", "func::FuncOp"> {
+  let summary =
+    "Configurable pass to apply pattern-based linalg splitReduction.";
+  let constructor = "mlir::createLinalgStrategySplitReductionPass()";
+  let dependentDialects = [
+    "linalg::LinalgDialect"
+  ];
+  let options = [
+    Option<"anchorFuncName", "anchor-func", "std::string", /*default=*/"",
+      "Which func op is the anchor to latch on.">,
+    Option<"anchorOpName", "anchor-op", "std::string", /*default=*/"",
+      "Which linalg op within the func is the anchor to latch on.">,
+  ];
+}
+
 def LinalgStrategyVectorizePass
     : Pass<"linalg-strategy-vectorize-pass", "func::FuncOp"> {
   let summary = "Configurable pass to apply pattern-based linalg vectorization.";
