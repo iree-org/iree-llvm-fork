@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <iostream>
+
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
@@ -604,18 +606,25 @@ mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
 
 LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
     LinalgOp linalgOp, PatternRewriter &rewriter) const {
-    return
-        splitReduction(rewriter, linalgOp, 
-        [this](linalg::LinalgOp linalgOp) -> std::pair<int64_t, unsigned> {
-          SmallVector<unsigned> dims;
-          linalgOp.getReductionDims(dims);
-          if (dims.size() != 1) {
-            return std::make_pair(0, 0);
-          }
-          return std::make_pair(options.splitRatio, dims[0]);
-        }, filter);
-    //if (failed(result)) return failure();
-    //return success();
+      if (failed(filter.checkAndNotify(rewriter, linalgOp)))
+        return failure();
+      if(isa<GenericOp>(linalgOp)) {
+        std::cerr << "Murali Operating on generic op\n";
+        auto result =
+          splitReduction(rewriter, linalgOp, 
+          [this](linalg::LinalgOp linalgOp) -> std::pair<int64_t, unsigned> {
+            SmallVector<unsigned> dims;
+            linalgOp.getReductionDims(dims);
+            if (dims.size() != 1) {
+              return std::make_pair(0, 0);
+            }
+            return std::make_pair(options.splitRatio, dims[0]);
+          }, filter);
+          if (failed(result)) return failure();
+          return result;
+      }
+      std::cerr << "Murali Operating on non-generic op\n";
+      return failure();
 }
 
 mlir::linalg::LinalgVectorizationPattern::LinalgVectorizationPattern(
