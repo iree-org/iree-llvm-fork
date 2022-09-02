@@ -25,9 +25,13 @@ struct Transformation {
   explicit Transformation(LinalgTransformationFilter::FilterFunction f)
       : filter(std::move(f)) {}
   virtual ~Transformation() = default;
+  virtual void setName(std::string pName = "") {  // Murali
+    name = pName; // Murali
+  }; // Murali
   virtual void addToPassPipeline(OpPassManager &pm,
                                  LinalgTransformationFilter m) const = 0;
   LinalgTransformationFilter::FilterFunction filter = nullptr;
+  std::string name = "";  // Murali
 };
 
 /// Represent one application of LinalgStrategyTileAndFusePass.
@@ -124,7 +128,7 @@ struct SplitReduce : public Transformation {
 
   void addToPassPipeline(OpPassManager &pm,
                          LinalgTransformationFilter m) const override {
-    pm.addPass(createLinalgStrategySplitReductionPass(opName, options, m));
+    //pm.addPass(createLinalgStrategySplitReductionPass(opName, options, m));
   }
 
 private:
@@ -183,6 +187,7 @@ struct CodegenStrategy {
               const LinalgTransformationFilter::FilterFunction &f = nullptr) {
     transformationSequence.emplace_back(
         std::make_unique<TileAndFuse>(opName, options, f));
+    transformationSequence.back()->setName("TileAndFuse");
     return *this;
   }
   /// Conditionally append a pattern to tile the Op `opName` and fuse its
@@ -199,6 +204,7 @@ struct CodegenStrategy {
        const LinalgTransformationFilter::FilterFunction &f = nullptr) {
     transformationSequence.emplace_back(
         std::make_unique<Tile>(opName, options, f));
+    transformationSequence.back()->setName("Tile");
     return *this;
   }
   /// Conditionally append a pattern to add a level of tiling for
@@ -215,6 +221,7 @@ struct CodegenStrategy {
       const LinalgTransformationFilter::FilterFunction &f = nullptr) {
     transformationSequence.emplace_back(
         std::make_unique<Pad>(opName, options, f));
+    transformationSequence.back()->setName("Pad");
     return *this;
   }
   /// Conditionally append a pattern to pad and hoist the operands of Op
@@ -228,6 +235,7 @@ struct CodegenStrategy {
   CodegenStrategy &
   decompose(const LinalgTransformationFilter::FilterFunction &f = nullptr) {
     transformationSequence.emplace_back(std::make_unique<Decompose>(f));
+    transformationSequence.back()->setName("Decompose");
     return *this;
   }
   /// Conditionally append patterns to decompose convolutions.
@@ -241,6 +249,7 @@ struct CodegenStrategy {
        const LinalgTransformationFilter::FilterFunction &f = nullptr) {
     transformationSequence.emplace_back(
         std::make_unique<Peel>(opName, options, f));
+    transformationSequence.back()->setName("Peel");
     return *this;
   }
   /// Conditionally append a pattern to peel 'LinalgOpType'.
@@ -255,6 +264,7 @@ struct CodegenStrategy {
        const LinalgTransformationFilter::FilterFunction &f = nullptr) {
     transformationSequence.emplace_back(
         std::make_unique<SplitReduce>(opName, options, f));
+    transformationSequence.back()->setName("SplitReduction");
     return *this;
   }
   /// Conditionally append a pattern for splitReduction
@@ -269,8 +279,9 @@ struct CodegenStrategy {
   vectorize(StringRef opName,
             const LinalgTransformationFilter::FilterFunction &f = nullptr,
             bool vectorizePadding = false) {
-    transformationSequence.emplace_back(std::make_unique<Vectorize>(
-        opName, linalg::LinalgVectorizationOptions(), f, vectorizePadding));
+    //transformationSequence.emplace_back(std::make_unique<Vectorize>(
+    //    opName, linalg::LinalgVectorizationOptions(), f, vectorizePadding));
+    //transformationSequence.back()->setName("Vectorize");
     return *this;
   }
   /// Conditionally append a pattern to rewrite `LinalgOpType` as a vector

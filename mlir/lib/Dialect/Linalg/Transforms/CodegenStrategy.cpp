@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <iostream> // Murali
+
 #include "mlir/Dialect/Linalg/Transforms/CodegenStrategy.h"
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
@@ -28,10 +30,12 @@ using namespace mlir::linalg;
 
 void mlir::linalg::CodegenStrategy::configurePassPipeline(
     OpPassManager &pm, MLIRContext *context, bool addEnablePass) const {
+  std::cerr << "Murali transformation sequence size: " << transformationSequence.size() << "\n";
   for (unsigned stepCount = 0, e = transformationSequence.size(); stepCount < e;
        ++stepCount) {
     const std::unique_ptr<Transformation> &t =
         transformationSequence[stepCount];
+    std::cerr << "Murali name : " << transformationSequence[stepCount]->name << " count: " << stepCount << "\n";
     std::string currentStr = std::to_string(stepCount);
     auto currentState = StringAttr::get(context, currentStr);
     std::string nextStr = std::to_string(stepCount + 1);
@@ -46,4 +50,6 @@ void mlir::linalg::CodegenStrategy::configurePassPipeline(
       pm.addPass(createLinalgStrategyEnablePass(linalgEnablingOptions));
   }
   pm.addPass(createLinalgStrategyRemoveMarkersPass());
+
+  std::cerr << "Murali ending pass pipeline\n";
 }

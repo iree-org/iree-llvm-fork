@@ -11,7 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <iostream>
+#include <iostream> // Murali
 
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -606,8 +606,11 @@ mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
 
 LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
     LinalgOp linalgOp, PatternRewriter &rewriter) const {
-      if (failed(filter.checkAndNotify(rewriter, linalgOp)))
+      std::cerr << "Murali Started my pass\n";
+      if (failed(filter.checkAndNotify(rewriter, linalgOp))) {
+        std::cerr << "Murali Ended my pass checkAndNotify failure\n";
         return failure();
+      }
       if(isa<GenericOp>(linalgOp)) {
         std::cerr << "Murali Operating on generic op\n";
         auto result =
@@ -620,7 +623,11 @@ LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
             }
             return std::make_pair(options.splitRatio, dims[0]);
           }, filter);
-          if (failed(result)) return failure();
+          if (failed(result)) {
+            std::cerr << "Murali Ended my failure\n";
+            return failure();
+          }
+          std::cerr << "Murali Ended my success\n";
           return result;
       }
       std::cerr << "Murali Operating on non-generic op\n";
