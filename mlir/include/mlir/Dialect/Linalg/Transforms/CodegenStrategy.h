@@ -128,7 +128,7 @@ struct SplitReduce : public Transformation {
 
   void addToPassPipeline(OpPassManager &pm,
                          LinalgTransformationFilter m) const override {
-    //pm.addPass(createLinalgStrategySplitReductionPass(opName, options, m));
+    pm.addPass(createLinalgStrategySplitReductionPass(opName, options, m));
   }
 
 private:
@@ -262,9 +262,9 @@ struct CodegenStrategy {
   CodegenStrategy &
   splitReduce(StringRef opName, const LinalgSplitReductionOptions &options,
        const LinalgTransformationFilter::FilterFunction &f = nullptr) {
-    //transformationSequence.emplace_back(
-    //    std::make_unique<SplitReduce>(opName, options, f));
-    //transformationSequence.back()->setName("SplitReduction");
+    transformationSequence.emplace_back(
+        std::make_unique<SplitReduce>(opName, options, f));
+    transformationSequence.back()->setName("SplitReduction");
     return *this;
   }
   /// Conditionally append a pattern for splitReduction

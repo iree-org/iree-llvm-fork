@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <iostream> // Murali
+
 #include <utility>
 
 #include "mlir/Analysis/SliceAnalysis.h"
@@ -96,6 +98,10 @@ FailureOr<SplitReductionResult> mlir::linalg::splitReduction(
   unsigned reductionDim = dims[0];
   SmallVector<int64_t, 4> loopRanges = op.getStaticLoopRanges();
   int64_t reductionDimSize = loopRanges[reductionDim];
+  std::cerr << "Murali dynamic: " << (reductionDimSize == ShapedType::kDynamicSize) <<
+               " ratio: " << reductionDimSize << " " << ratio << " " << (reductionDimSize%ratio) <<
+               " insert: " << insertSplitDimension << " " << loopRanges.size()
+               << " reductionDim: " << reductionDim << "\n";
   if (reductionDimSize == ShapedType::kDynamicSize ||
       reductionDimSize % ratio != 0 ||
       insertSplitDimension >= loopRanges.size())

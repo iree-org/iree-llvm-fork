@@ -612,14 +612,14 @@ LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
         return failure();
       }
       if(isa<GenericOp>(linalgOp)) {
-        std::cerr << "Murali Operating on generic op\n";
+        std::cerr << "Murali Operating on generic op ratio: " << options.splitRatio << "\n";
         auto result =
           splitReduction(rewriter, linalgOp, 
           [this](linalg::LinalgOp linalgOp) -> std::pair<int64_t, unsigned> {
             SmallVector<unsigned> dims;
             linalgOp.getReductionDims(dims);
             if (dims.size() != 1) {
-              return std::make_pair(0, 0);
+              return std::make_pair(0, dims[0]);
             }
             return std::make_pair(options.splitRatio, dims[0]);
           }, filter);
