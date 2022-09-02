@@ -262,9 +262,9 @@ struct CodegenStrategy {
   CodegenStrategy &
   splitReduce(StringRef opName, const LinalgSplitReductionOptions &options,
        const LinalgTransformationFilter::FilterFunction &f = nullptr) {
-    transformationSequence.emplace_back(
-        std::make_unique<SplitReduce>(opName, options, f));
-    transformationSequence.back()->setName("SplitReduction");
+    //transformationSequence.emplace_back(
+    //    std::make_unique<SplitReduce>(opName, options, f));
+    //transformationSequence.back()->setName("SplitReduction");
     return *this;
   }
   /// Conditionally append a pattern for splitReduction
@@ -279,9 +279,9 @@ struct CodegenStrategy {
   vectorize(StringRef opName,
             const LinalgTransformationFilter::FilterFunction &f = nullptr,
             bool vectorizePadding = false) {
-    //transformationSequence.emplace_back(std::make_unique<Vectorize>(
-    //    opName, linalg::LinalgVectorizationOptions(), f, vectorizePadding));
-    //transformationSequence.back()->setName("Vectorize");
+    transformationSequence.emplace_back(std::make_unique<Vectorize>(
+        opName, linalg::LinalgVectorizationOptions(), f, vectorizePadding));
+    transformationSequence.back()->setName("Vectorize");
     return *this;
   }
   /// Conditionally append a pattern to rewrite `LinalgOpType` as a vector

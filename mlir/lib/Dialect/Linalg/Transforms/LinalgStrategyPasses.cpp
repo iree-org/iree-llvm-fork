@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <iostream> // Murali
+
 #include <utility>
 
 #include "PassDetail.h"
@@ -335,6 +337,8 @@ struct LinalgStrategyEnablePass
     dynamicPM.addPass(createCSEPass());
     if (failed(runPipeline(dynamicPM, funcOp)))
       return signalPassFailure();
+
+    std::cerr << "Murali ending strategy enable pass\n";
   }
 
   LinalgEnablingOptions options;
