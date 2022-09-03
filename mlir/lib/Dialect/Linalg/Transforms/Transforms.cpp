@@ -611,6 +611,10 @@ LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
         std::cerr << "Murali Ended my pass checkAndNotify failure\n";
         return failure();
       }
+
+      // Increase marker counter even if splitReduction doesn't happen for this op.
+      filter.replaceLinalgTransformationFilter(rewriter, linalgOp);
+
       if(isa<GenericOp>(linalgOp)) {
         std::cerr << "Murali Operating on generic op ratio: " << options.splitRatio << "\n";
         auto result =

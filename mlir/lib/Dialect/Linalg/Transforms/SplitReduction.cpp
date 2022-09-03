@@ -100,7 +100,7 @@ FailureOr<SplitReductionResult> mlir::linalg::splitReduction(
   int64_t reductionDimSize = loopRanges[reductionDim];
   std::cerr << "Murali dynamic: " << (reductionDimSize == ShapedType::kDynamicSize) <<
                " ratio: " << reductionDimSize << " " << ratio << " " << (reductionDimSize%ratio) <<
-               " insert: " << insertSplitDimension << " " << loopRanges.size()
+               " insert: " << insertSplitDimension << " loopSize: " << loopRanges.size()
                << " reductionDim: " << reductionDim << "\n";
   if (reductionDimSize == ShapedType::kDynamicSize ||
       reductionDimSize % ratio != 0 ||
