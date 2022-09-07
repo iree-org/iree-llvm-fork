@@ -64,10 +64,19 @@ FailureOr<LinalgOp> mlir::linalg::splitReduction(
     PatternRewriter &b, LinalgOp op,
     const ControlSplitReductionFn &controlSplitReductionFn,
     const LinalgTransformationFilter &filter, bool useAlloc) {
-  if (failed(filter.checkAndNotify(b, op)) || !op.hasTensorSemantics() ||
+  std::cerr << "Murali numReductionLoops: " << op.getNumReductionLoops() << "\n";
+  std::cerr << "Murali numOutputs: " << op.getNumOutputs() << "\n";
+  std::cerr << "Murali hasOnlyProjectedPermutations: " << op.hasOnlyProjectedPermutations() << "\n";
+  std::cerr << "Murali hasTensorSemantics: " << op.hasTensorSemantics() << "\n";
+  auto hasFailed = failed(filter.checkAndNotify(b, op));
+  std::cerr << "Murali failed(checkAndNotify): " << hasFailed << "\n";
+  if (hasFailed || !op.hasTensorSemantics() || // Murali
+  //if (failed(filter.checkAndNotify(b, op)) || !op.hasTensorSemantics() ||
       op.getNumReductionLoops() != 1 || op.getNumOutputs() != 1 ||
-      !op.hasOnlyProjectedPermutations())
+      !op.hasOnlyProjectedPermutations()) {
+    std::cerr << "Murali still failed\n";
     return b.notifyMatchFailure(op, "precondition not met");
+  }
 
   FailureOr<SplitReductionResult> res =
       splitReduction(b, op, controlSplitReductionFn, useAlloc);
@@ -89,6 +98,8 @@ FailureOr<SplitReductionResult> mlir::linalg::splitReduction(
   std::pair<int64_t, unsigned> control = controlSplitReductionFn(op);
   int64_t ratio = control.first;
   unsigned insertSplitDimension = control.second;
+
+  std::cerr << "Murali splitRatio: " << ratio << "\n";
   if (ratio <= 1)
     return b.notifyMatchFailure(op, "split ratio needs to be greater than 1");
 
@@ -98,10 +109,12 @@ FailureOr<SplitReductionResult> mlir::linalg::splitReduction(
   unsigned reductionDim = dims[0];
   SmallVector<int64_t, 4> loopRanges = op.getStaticLoopRanges();
   int64_t reductionDimSize = loopRanges[reductionDim];
-  std::cerr << "Murali dynamic: " << (reductionDimSize == ShapedType::kDynamicSize) <<
-               " ratio: " << reductionDimSize << " " << ratio << " " << (reductionDimSize%ratio) <<
-               " insert: " << insertSplitDimension << " loopSize: " << loopRanges.size()
-               << " reductionDim: " << reductionDim << "\n";
+  std::cerr << "Murali dynamicSize: " << (reductionDimSize == ShapedType::kDynamicSize) << "\n";
+  std::cerr << "Murali reductionDimSize: " << reductionDimSize << "\n";
+  std::cerr << "Murali ratio is a multiple: " << reductionDimSize%ratio << "\n";
+  std::cerr << "Murali reductionDim: " << reductionDim << "\n";
+  std::cerr << "Murali insertSplitDimension: " << insertSplitDimension << "\n";
+  std::cerr << "Murali loopRanges.size(): " << loopRanges.size() << "\n";
   if (reductionDimSize == ShapedType::kDynamicSize ||
       reductionDimSize % ratio != 0 ||
       insertSplitDimension >= loopRanges.size())

@@ -70,8 +70,10 @@ mlir::linalg::LinalgTransformationFilter::LinalgTransformationFilter(
 LogicalResult mlir::linalg::LinalgTransformationFilter::checkAndNotify(
     PatternRewriter &rewriter, Operation *op) const {
   if (llvm::any_of(filters,
-                   [&](const FilterFunction &f) { return failed(f(op)); }))
+                   [&](const FilterFunction &f) { return failed(f(op)); })) {
+                    std::cerr << "Murali some filter failed for op\n";
     return failure();
+                   }
 
   auto attr = op->template getAttrOfType<StringAttr>(
       LinalgTransforms::kLinalgTransformMarker);
@@ -606,9 +608,9 @@ mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
 
 LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
     LinalgOp linalgOp, PatternRewriter &rewriter) const {
-      std::cerr << "Murali Started my pass\n";
+      std::cerr << "Murali Started SplitReduction pass\n";
       if (failed(filter.checkAndNotify(rewriter, linalgOp))) {
-        std::cerr << "Murali Ended my pass checkAndNotify failure\n";
+        std::cerr << "Murali Ended SplitReduction pass checkAndNotify failure\n";
         return failure();
       }
 
@@ -616,22 +618,20 @@ LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
       filter.replaceLinalgTransformationFilter(rewriter, linalgOp);
 
       if(isa<GenericOp>(linalgOp)) {
-        std::cerr << "Murali Operating on generic op ratio: " << options.splitRatio << "\n";
+        std::cerr << "Murali Operating on generic op splitRatio: " << options.splitRatio << "\n";
+        std::cerr << "Murali Operating on generic op NumReductionLoops: " << linalgOp.getNumReductionLoops() << "\n";
         auto result =
           splitReduction(rewriter, linalgOp, 
           [this](linalg::LinalgOp linalgOp) -> std::pair<int64_t, unsigned> {
             SmallVector<unsigned> dims;
             linalgOp.getReductionDims(dims);
-            if (dims.size() != 1) {
-              return std::make_pair(0, dims[0]);
-            }
             return std::make_pair(options.splitRatio, dims[0]);
           }, filter);
           if (failed(result)) {
-            std::cerr << "Murali Ended my failure\n";
+            std::cerr << "Murali Ended SplitReduction pass failure\n";
             return failure();
           }
-          std::cerr << "Murali Ended my success\n";
+          std::cerr << "Murali Ended SplitReduction pass success\n";
           return result;
       }
       std::cerr << "Murali Operating on non-generic op\n";

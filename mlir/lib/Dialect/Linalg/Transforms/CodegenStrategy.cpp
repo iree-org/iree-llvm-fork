@@ -30,12 +30,12 @@ using namespace mlir::linalg;
 
 void mlir::linalg::CodegenStrategy::configurePassPipeline(
     OpPassManager &pm, MLIRContext *context, bool addEnablePass) const {
-  std::cerr << "Murali transformation sequence size: " << transformationSequence.size() << "\n";
+  std::cerr << "Murali transformationSequence.size(): " << transformationSequence.size() << "\n";
   for (unsigned stepCount = 0, e = transformationSequence.size(); stepCount < e;
        ++stepCount) {
     const std::unique_ptr<Transformation> &t =
         transformationSequence[stepCount];
-    std::cerr << "Murali name : " << transformationSequence[stepCount]->name << " count: " << stepCount << "\n";
+    std::cerr << "Murali transformationSequence[" << stepCount << "]->name : " << transformationSequence[stepCount]->name << "\n";
     std::string currentStr = std::to_string(stepCount);
     auto currentState = StringAttr::get(context, currentStr);
     std::string nextStr = std::to_string(stepCount + 1);
