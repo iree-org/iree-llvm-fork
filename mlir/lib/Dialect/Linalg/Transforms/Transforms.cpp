@@ -70,10 +70,8 @@ mlir::linalg::LinalgTransformationFilter::LinalgTransformationFilter(
 LogicalResult mlir::linalg::LinalgTransformationFilter::checkAndNotify(
     PatternRewriter &rewriter, Operation *op) const {
   if (llvm::any_of(filters,
-                   [&](const FilterFunction &f) { return failed(f(op)); })) {
-                    std::cerr << "Murali some filter failed for op\n";
+                   [&](const FilterFunction &f) { return failed(f(op)); }))
     return failure();
-                   }
 
   auto attr = op->template getAttrOfType<StringAttr>(
       LinalgTransforms::kLinalgTransformMarker);
@@ -609,13 +607,6 @@ mlir::linalg::LinalgSplitReductionPattern::LinalgSplitReductionPattern(
 LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
     LinalgOp linalgOp, PatternRewriter &rewriter) const {
       std::cerr << "Murali Started SplitReduction pass\n";
-      if (failed(filter.checkAndNotify(rewriter, linalgOp))) {
-        std::cerr << "Murali Ended SplitReduction pass checkAndNotify failure\n";
-        return failure();
-      }
-
-      // Increase marker counter even if splitReduction doesn't happen for this op.
-      filter.replaceLinalgTransformationFilter(rewriter, linalgOp);
 
       if(isa<GenericOp>(linalgOp)) {
         std::cerr << "Murali Operating on generic op splitRatio: " << options.splitRatio << "\n";
@@ -629,12 +620,21 @@ LogicalResult mlir::linalg::LinalgSplitReductionPattern::matchAndRewrite(
           }, filter);
           if (failed(result)) {
             std::cerr << "Murali Ended SplitReduction pass failure\n";
+            filter.replaceLinalgTransformationFilter(rewriter, linalgOp);
             return failure();
           }
           std::cerr << "Murali Ended SplitReduction pass success\n";
           return result;
       }
       std::cerr << "Murali Operating on non-generic op\n";
+      if (failed(filter.checkAndNotify(rewriter, linalgOp))) {
+        std::cerr << "Murali Ended SplitReduction pass checkAndNotify failure\n";
+        return failure();
+      }
+
+      // Increase marker counter even if splitReduction doesn't happen for this op.
+      filter.replaceLinalgTransformationFilter(rewriter, linalgOp);
+
       return failure();
 }
 
