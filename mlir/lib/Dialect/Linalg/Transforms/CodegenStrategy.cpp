@@ -40,6 +40,7 @@ void mlir::linalg::CodegenStrategy::configurePassPipeline(
     auto currentState = StringAttr::get(context, currentStr);
     std::string nextStr = std::to_string(stepCount + 1);
     auto nextState = StringAttr::get(context, nextStr);
+    std::cerr << "Murali stateTransition: " << currentState.str() << " " << nextState.str() << "\n";
     auto filter = (currentState.str() == std::to_string(0))
                       ? linalg::LinalgTransformationFilter(
                             t->filter, ArrayRef<StringAttr>{}, nextState)
