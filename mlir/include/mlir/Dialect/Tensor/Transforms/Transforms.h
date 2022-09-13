@@ -29,6 +29,14 @@ void populateSplitPaddingPatterns(RewritePatternSet &patterns,
 FailureOr<Value> replaceExtractSliceWithTiledProducer(
     OpBuilder &builder, tensor::ExtractSliceOp sliceOp, OpResult producerOp);
 
+/// Collects patterns to fold consecutive tensor.insert_slice or
+/// tensor.extract_slice ops into one. These patterns are in in this separate
+/// entry point because the bufferization is sensitive over IR structure,
+/// particularly those tensor.extract_slice and tensor.insert_slice ops for
+/// creating the slices.
+void populateFoldConsecutiveInsertExtractSlicePatterns(
+    RewritePatternSet &patterns);
+
 } // namespace tensor
 } // namespace mlir
 
