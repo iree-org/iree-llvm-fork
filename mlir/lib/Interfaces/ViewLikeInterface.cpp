@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Interfaces/ViewLikeInterface.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 
@@ -202,4 +203,53 @@ std::pair<ArrayAttr, SmallVector<Value>>
 mlir::decomposeMixedSizes(OpBuilder &b,
                           const SmallVectorImpl<OpFoldResult> &mixedValues) {
   return decomposeMixedValues(b, mixedValues, ShapedType::kDynamicSize);
+}
+
+bool mlir::areDisjointRanges(ArrayRef<OpFoldResult> aOffsets,
+                             ArrayRef<OpFoldResult> aSizes,
+                             ArrayRef<OpFoldResult> bOffsets,
+                             ArrayRef<OpFoldResult> bSizes) {
+  assert(llvm::all_equal(
+      {aOffsets.size(), aSizes.size(), bOffsets.size(), bSizes.size()}));
+
+  for (const auto &t : llvm::zip(aOffsets, aSizes, bOffsets, bSizes)) {
+    auto [aBeginVal, aSizeVal, bBeginVal, bSizeVal] = t;
+    Optional<int64_t> aBegin = getConstantIntValue(aBeginVal);
+    Optional<int64_t> aSize = getConstantIntValue(aSizeVal);
+    Optional<int64_t> bBegin = getConstantIntValue(bBeginVal);
+    Optional<int64_t> bSize = getConstantIntValue(bSizeVal);
+
+    // If there are dynamic offsets/sizes, we cannot prove this dimension is
+    // disjoint. Look at other dimensions.
+    if (!aBegin || !aSize || !bBegin || !bSize)
+      continue;
+
+    int aEnd = *aBegin + *aSize;
+    int bEnd = *bBegin + *bSize;
+    // As long as one dimension is disjoint, the whole slices are disjoint.
+    if (aEnd <= *bBegin || bEnd <= *aBegin)
+      return true;
+  }
+  return false;
+}
+
+bool mlir::areDisjointSlices(OffsetSizeAndStrideOpInterface aSlice,
+                             OffsetSizeAndStrideOpInterface bSlice) {
+  SmallVector<OpFoldResult> aOffsets = aSlice.getMixedOffsets();
+  SmallVector<OpFoldResult> bOffsets = bSlice.getMixedOffsets();
+  SmallVector<OpFoldResult> aSizes = aSlice.getMixedSizes();
+  SmallVector<OpFoldResult> bSizes = bSlice.getMixedSizes();
+  SmallVector<OpFoldResult> aStrides = aSlice.getMixedStrides();
+  SmallVector<OpFoldResult> bStrides = bSlice.getMixedStrides();
+
+  // For simplicity only look at stride 1 cases for now.
+  auto hasAllOnes = [](ArrayRef<OpFoldResult> strides) {
+    return llvm::all_of(strides, [](::mlir::OpFoldResult ofr) {
+      return getConstantIntValue(ofr) == static_cast<int64_t>(1);
+    });
+  };
+  if (!hasAllOnes(aStrides) || !hasAllOnes(bStrides))
+    return false;
+
+  return areDisjointRanges(aOffsets, aSizes, bOffsets, bSizes);
 }

@@ -55,6 +55,15 @@ std::pair<ArrayAttr, SmallVector<Value>>
 decomposeMixedSizes(OpBuilder &b,
                     const SmallVectorImpl<OpFoldResult> &mixedValues);
 
+/// Returns true if the given two n-D ranges can be proven as disjoint.
+/// Returns false otherwise.
+///
+/// This function assumes all input arrays to have the same size.
+bool areDisjointRanges(ArrayRef<OpFoldResult> aOffsets,
+                       ArrayRef<OpFoldResult> aSizes,
+                       ArrayRef<OpFoldResult> bOffsets,
+                       ArrayRef<OpFoldResult> bSizes);
+
 class OffsetSizeAndStrideOpInterface;
 
 namespace detail {
@@ -109,6 +118,13 @@ parseDynamicIndexList(OpAsmParser &parser,
 LogicalResult verifyListOfOperandsOrIntegers(
     Operation *op, StringRef name, unsigned expectedNumElements, ArrayAttr attr,
     ValueRange values, function_ref<bool(int64_t)> isDynamic);
+
+/// Returns true if the given two slices can be proven as disjoint. Returns
+/// false otherwise.
+///
+/// This function assumes the two slices have the same rank.
+bool areDisjointSlices(OffsetSizeAndStrideOpInterface aSlice,
+                       OffsetSizeAndStrideOpInterface bSlice);
 
 } // namespace mlir
 

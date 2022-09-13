@@ -37,6 +37,10 @@ FailureOr<Value> replaceExtractSliceWithTiledProducer(
 void populateFoldConsecutiveInsertExtractSlicePatterns(
     RewritePatternSet &patterns);
 
+/// Collects patterns to update tensor.extract_slice to extract from the
+/// destination tensor of its producer tensor.insert_slice op.
+void populateExtractFromInsertSliceDestOpPatterns(RewritePatternSet &patterns);
+
 } // namespace tensor
 } // namespace mlir
 
