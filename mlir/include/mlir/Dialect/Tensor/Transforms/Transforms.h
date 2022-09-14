@@ -41,6 +41,12 @@ void populateFoldConsecutiveInsertExtractSlicePatterns(
 /// destination tensor of its producer tensor.insert_slice op.
 void populateExtractFromInsertSliceDestOpPatterns(RewritePatternSet &patterns);
 
+/// Collects patterns to hoist pairing tensor.extract_slice/insert_slice ops
+/// out of scf.for loops when possible. The slice op pair should have matching
+/// loop invairant offsets/sizes/strides; they should extract from and insert
+/// into the same loop carried value.
+void populateHoistExtractInsertSliceOpPatterns(RewritePatternSet &patterns);
+
 } // namespace tensor
 } // namespace mlir
 

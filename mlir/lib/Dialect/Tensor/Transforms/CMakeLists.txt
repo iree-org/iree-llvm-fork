@@ -4,6 +4,7 @@ add_mlir_dialect_library(MLIRTensorTransforms
   ExtractFromInsertSliceDest.cpp
   ExtractSliceFromReshape.cpp
   FoldConsecutiveInsertExtract.cpp
+  HoistExtractInsertSlice.cpp
   SplitPadding.cpp
   SwapExtractSliceWithProducer.cpp
 
