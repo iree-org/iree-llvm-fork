@@ -340,6 +340,12 @@ void populateVectorUnrollPatterns(RewritePatternSet &patterns,
                                   const UnrollVectorOptions &options,
                                   PatternBenefit benefit = 1);
 
+/// Swaps vector.transfer_write op that are used as tensor.insert_slice source
+/// or destination tensors. This may help to push tensor insert/extract slice
+/// ops to be near each other so that we can cancel them later.
+void populateVectorReorderTransferExtractInsertSlicePatterns(
+    RewritePatternSet &patterns, PatternBenefit benefit = 1);
+
 //===----------------------------------------------------------------------===//
 // Finer-grained patterns exposed for more control over individual lowerings.
 //===----------------------------------------------------------------------===//
