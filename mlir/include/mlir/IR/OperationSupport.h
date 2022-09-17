@@ -788,6 +788,9 @@ public:
   /// Print users of values as comments.
   OpPrintingFlags &printValueUsers();
 
+  /// Print op results.
+  OpPrintingFlags &printResults(bool printResults = true);
+
   /// Return if the given ElementsAttr should be elided.
   bool shouldElideElementsAttr(ElementsAttr attr) const;
 
@@ -812,6 +815,9 @@ public:
   /// Return if the printer should print users of values.
   bool shouldPrintValueUsers() const;
 
+  /// Return if the printer should print the op results.
+  bool shouldPrintResults() const;
+
 private:
   /// Elide large elements attributes if the number of elements is larger than
   /// the upper limit.
@@ -832,6 +838,9 @@ private:
 
   /// Print users of values.
   bool printValueUsersFlag : 1;
+
+  /// Print op results.
+  bool printResultsFlag : 1;
 };
 
 //===----------------------------------------------------------------------===//

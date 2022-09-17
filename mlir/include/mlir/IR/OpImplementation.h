@@ -340,6 +340,9 @@ public:
                                    ArrayRef<NamedAttribute> argAttrs = {},
                                    bool omitType = false) = 0;
 
+  /// Print an operation omitting its results, including the sign '='.
+  void printOperationWithoutResults(Operation *);
+
   /// Print implementations for various things an operation contains.
   virtual void printOperand(Value value) = 0;
   virtual void printOperand(Value value, raw_ostream &os) = 0;

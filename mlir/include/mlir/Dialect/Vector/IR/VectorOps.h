@@ -21,6 +21,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
+#include "mlir/Interfaces/MaskingInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/VectorInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
@@ -48,6 +49,10 @@ class VectorDialect;
 namespace detail {
 struct BitmaskEnumStorage;
 } // namespace detail
+
+/// Default callback to build a region with a 'vector.yield' terminator with no
+/// arguments.
+void buildTerminatedBody(OpBuilder &builder, Location loc);
 
 /// Return whether `srcType` can be broadcast to `dstVectorType` under the
 /// semantics of the `vector.broadcast` op.

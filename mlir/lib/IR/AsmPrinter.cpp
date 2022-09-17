@@ -78,6 +78,11 @@ DialectAsmPrinter::~DialectAsmPrinter() = default;
 
 OpAsmPrinter::~OpAsmPrinter() = default;
 
+/// Print an operation omitting its results, including the '=' sign.
+void OpAsmPrinter::printOperationWithoutResults(Operation *op) {
+  op->print(getStream(), OpPrintingFlags().useLocalScope().printResults(false));
+}
+
 void OpAsmPrinter::printFunctionalType(Operation *op) {
   auto &os = getStream();
   os << '(';
@@ -184,7 +189,8 @@ void mlir::registerAsmPrinterCLOptions() {
 OpPrintingFlags::OpPrintingFlags()
     : printDebugInfoFlag(false), printDebugInfoPrettyFormFlag(false),
       printGenericOpFormFlag(false), assumeVerifiedFlag(false),
-      printLocalScope(false), printValueUsersFlag(false) {
+      printLocalScope(false), printValueUsersFlag(false),
+      printResultsFlag(true) {
   // Initialize based upon command line options, if they are available.
   if (!clOptions.isConstructed())
     return;
@@ -242,6 +248,12 @@ OpPrintingFlags &OpPrintingFlags::printValueUsers() {
   return *this;
 }
 
+/// Print op results.
+OpPrintingFlags &OpPrintingFlags::printResults(bool printResults) {
+  printResultsFlag = printResults;
+  return *this;
+}
+
 /// Return if the given ElementsAttr should be elided.
 bool OpPrintingFlags::shouldElideElementsAttr(ElementsAttr attr) const {
   return elementsAttrElementLimit &&
@@ -281,6 +293,9 @@ bool OpPrintingFlags::shouldUseLocalScope() const { return printLocalScope; }
 bool OpPrintingFlags::shouldPrintValueUsers() const {
   return printValueUsersFlag;
 }
+
+/// Return if the printer should print the op results.
+bool OpPrintingFlags::shouldPrintResults() const { return printResultsFlag; }
 
 /// Returns true if an ElementsAttr with the given number of elements should be
 /// printed with hex.
@@ -2934,7 +2949,8 @@ void OperationPrinter::print(Operation *op) {
 }
 
 void OperationPrinter::printOperation(Operation *op) {
-  if (size_t numResults = op->getNumResults()) {
+  size_t numResults = op->getNumResults();
+  if (printerFlags.shouldPrintResults() && numResults > 0) {
     auto printResultGroup = [&](size_t resultNo, size_t resultCount) {
       printValueID(op->getResult(resultNo), /*printResultNo=*/false);
       if (resultCount > 1)

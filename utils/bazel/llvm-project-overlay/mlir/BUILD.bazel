@@ -972,6 +972,13 @@ td_library(
 )
 
 td_library(
+    name = "MaskingInterfacesTdFiles",
+    srcs = ["include/mlir/Interfaces/MaskingInterfaces.td"],
+    includes = ["include"],
+    deps = [":OpBaseTdFiles"],
+)
+
+td_library(
     name = "LoopLikeInterfaceTdFiles",
     srcs = ["include/mlir/Interfaces/LoopLikeInterface.td"],
     includes = ["include"],
@@ -3169,6 +3176,7 @@ cc_library(
         ":DialectUtils",
         ":IR",
         ":InferTypeOpInterface",
+        ":MaskingInterfaces",
         ":MemRefDialect",
         ":SideEffectInterfaces",
         ":Support",
@@ -5890,6 +5898,37 @@ cc_library(
 )
 
 gentbl_cc_library(
+    name = "MaskingInterfacesIncGen",
+    strip_include_prefix = "include",
+    tbl_outs = [
+        (
+            ["-gen-op-interface-decls"],
+            "include/mlir/Interfaces/MaskingInterfaces.h.inc",
+        ),
+        (
+            ["-gen-op-interface-defs"],
+            "include/mlir/Interfaces/MaskingInterfaces.cpp.inc",
+        ),
+    ],
+    tblgen = ":mlir-tblgen",
+    td_file = "include/mlir/Interfaces/MaskingInterfaces.td",
+    deps = [":MaskingInterfacesTdFiles"],
+)
+
+cc_library(
+    name = "MaskingInterfaces",
+    srcs = ["lib/Interfaces/MaskingInterfaces.cpp"],
+    hdrs = ["include/mlir/Interfaces/MaskingInterfaces.h"],
+    includes = ["include"],
+    deps = [
+        ":IR",
+        ":MaskingInterfacesIncGen",
+        ":Support",
+        "//llvm:Support",
+    ],
+)
+
+gentbl_cc_library(
     name = "SideEffectInterfacesIncGen",
     strip_include_prefix = "include",
     tbl_outs = [
@@ -7774,6 +7813,7 @@ td_library(
     deps = [
         ":ControlFlowInterfacesTdFiles",
         ":InferTypeOpInterfaceTdFiles",
+        ":MaskingInterfacesTdFiles",
         ":OpBaseTdFiles",
         ":SideEffectInterfacesTdFiles",
         ":VectorInterfacesTdFiles",
