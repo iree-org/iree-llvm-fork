@@ -1001,8 +1001,9 @@ transform::SplitReductionOp::applyToOne(linalg::LinalgOp target,
                                         SmallVectorImpl<Operation *> &results,
                                         transform::TransformState &state) {
   ControlSplitReductionFn splitFn = [&](LinalgOp) {
-    return std::pair<int64_t, unsigned>(getSplitFactor(),
-                                        getInsertSplitDimension());
+    return linalg::SplitReductionOptions{.ratio=int64_t(getSplitFactor()),
+                                         .index=unsigned(getInsertSplitDimension()),
+                                         .innerParallel=false};
   };
   SimpleRewriter rewriter(getContext());
   rewriter.setInsertionPoint(target);
