@@ -166,11 +166,66 @@ public:
     return success();
   }
 };
+
+template <typename ResultsContainer>
+bool replaceConstantUsesOf(PatternRewriter &rewriter,
+                           memref::ExtractStridedMetadataOp metadataOp,
+                           ArrayRef<int64_t> maybeConstants,
+                           ResultsContainer results,
+                           llvm::function_ref<bool(int64_t)> isDynamic) {
+  bool atLeastOneReplacement = false;
+  for (auto [maybeConstant, result] : llvm::zip(maybeConstants, results)) {
+    if (isDynamic(maybeConstant))
+      continue;
+    Value constantVal = rewriter.create<arith::ConstantIndexOp>(
+        metadataOp.getLoc(), maybeConstant);
+    for (Operation *op : result.getUsers()) {
+      rewriter.startRootUpdate(op);
+      // updateRootInplace: lambda cannot capture structured bindings in C++17
+      // yet.
+      op->replaceUsesOfWith(result, constantVal);
+      rewriter.finalizeRootUpdate(op);
+      atLeastOneReplacement = true;
+    }
+  }
+  return atLeastOneReplacement;
+};
+
+// Forward propagate all constants information from an ExtractStridedMetadataOp.
+struct ForwardStaticMetadata
+    : public OpRewritePattern<memref::ExtractStridedMetadataOp> {
+  using OpRewritePattern<memref::ExtractStridedMetadataOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(memref::ExtractStridedMetadataOp metadataOp,
+                                PatternRewriter &rewriter) const override {
+    auto memrefType = metadataOp.getSource().getType().cast<MemRefType>();
+    SmallVector<int64_t> strides;
+    int64_t offset;
+    LogicalResult res = getStridesAndOffset(memrefType, strides, offset);
+    assert(succeeded(res) && "must be a strided memref type");
+
+    bool atLeastOneReplacement = replaceConstantUsesOf(
+        rewriter, metadataOp, ArrayRef<int64_t>(offset),
+        ArrayRef<TypedValue<IndexType>>(metadataOp.getOffset()),
+        ShapedType::isDynamicStrideOrOffset);
+    atLeastOneReplacement |=
+        replaceConstantUsesOf(rewriter, metadataOp, memrefType.getShape(),
+                              metadataOp.getSizes(), ShapedType::isDynamic);
+    atLeastOneReplacement |= replaceConstantUsesOf(
+        rewriter, metadataOp, strides, metadataOp.getStrides(),
+        ShapedType::isDynamicStrideOrOffset);
+
+    metadataOp->getParentOfType<ModuleOp>().dump();
+
+    return success(atLeastOneReplacement);
+  }
+};
 } // namespace
 
 void memref::populateSimplifyExtractStridedMetadataOpPatterns(
     RewritePatternSet &patterns) {
-  patterns.add<ExtractStridedMetadataOpSubviewFolder>(patterns.getContext());
+  patterns.add<ExtractStridedMetadataOpSubviewFolder, ForwardStaticMetadata>(
+      patterns.getContext());
 }
 
 //===----------------------------------------------------------------------===//
