@@ -499,7 +499,7 @@ static void applySplitReduction(func::FuncOp funcOp) {
       patterns,
       [](LinalgOp op) {
         unsigned insertDimIndex = op.getNumLoops() - 1;
-        return std::make_pair(4, insertDimIndex);
+        return SplitReductionOptions{4, insertDimIndex, false};
       },
       LinalgTransformationFilter(
           ArrayRef<StringAttr>{},
