@@ -455,6 +455,38 @@ OpFoldResult transform::MergeHandlesOp::fold(ArrayRef<Attribute> operands) {
 }
 
 //===----------------------------------------------------------------------===//
+// UnpackHandlesOp
+//===----------------------------------------------------------------------===//
+
+DiagnosedSilenceableFailure
+transform::UnpackHandlesOp::apply(transform::TransformResults &results,
+                                  transform::TransformState &state) {
+  int64_t idx = 0;
+  for (Operation *op : state.getPayloadOps(getHandle()))
+    results.set(getResults()[idx++].cast<OpResult>(), op);
+
+  return DiagnosedSilenceableFailure::success();
+}
+
+void transform::UnpackHandlesOp::getEffects(
+    SmallVectorImpl<MemoryEffects::EffectInstance> &effects) {
+  consumesHandle(getHandle(), effects);
+  producesHandle(getResults(), effects);
+  // There are no effects on the Payload IR as this is only a handle
+  // manipulation.
+}
+
+// OpFoldResult transform::UnpackHandlesOp::fold(ArrayRef<Attribute> operands) {
+//   if (getDeduplicate() || getHandles().size() != 1)
+//     return {};
+
+//   // If deduplication is not required and there is only one operand, it can
+//   be
+//   // used directly instead of merging.
+//   return getHandles().front();
+// }
+
+//===----------------------------------------------------------------------===//
 // PDLMatchOp
 //===----------------------------------------------------------------------===//
 

@@ -210,6 +210,19 @@ def MergeHandlesOp : TransformDialectOp<"merge_handles",
   let hasFolder = 1;
 }
 
+def UnpackHandlesOp : TransformDialectOp<"unpack_handles",
+    [DeclareOpInterfaceMethods<TransformOpInterface>,
+     DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Unpacks handles from a union of payload ops to a list";
+  let description = [{
+  }];
+
+  let arguments = (ins PDL_Operation:$handle);
+  let results = (outs Variadic<PDL_Operation>:$results);
+  let assemblyFormat = "$handle attr-dict `:` functional-type($handle, results)";
+  // let hasFolder = 1;
+}
+
 def PDLMatchOp : TransformDialectOp<"pdl_match",
     [DeclareOpInterfaceMethods<TransformOpInterface>]> {
   let summary = "Finds ops that match the named PDL pattern";
