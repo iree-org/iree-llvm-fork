@@ -1033,7 +1033,7 @@ struct MultiReduceToContract
 ///    kind = add} %arg0, %arg1, %cst_f0
 ///    : vector<8x32x16xf32>, vector<8x32x16xf32> into vector<8x32xf32>
 ///  ```
-struct CombineContractTranspose
+struct CombineContractABTranspose final
     : public OpRewritePattern<vector::ContractionOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -1050,8 +1050,6 @@ struct CombineContractTranspose
       auto transposeOp = operand->getDefiningOp<vector::TransposeOp>();
       if (!transposeOp)
         continue;
-      SmallVector<int64_t> perm;
-      transposeOp.getTransp(perm);
       AffineMap permutationMap = AffineMap::getPermutationMap(
           extractVector<unsigned>(transposeOp.getTransp()),
           contractOp.getContext());
@@ -1063,6 +1061,52 @@ struct CombineContractTranspose
       return failure();
     rewriter.replaceOpWithNewOp<vector::ContractionOp>(
         contractOp, lhs, rhs, contractOp.getAcc(),
+        rewriter.getAffineMapArrayAttr(maps), contractOp.getIteratorTypes());
+    return success();
+  }
+};
+
+struct CombineContractResultTranspose final
+    : public OpRewritePattern<vector::TransposeOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(vector::TransposeOp resTOp,
+                                PatternRewriter &rewriter) const override {
+    LLVM_DEBUG(llvm::dbgs() << "result transpose: " << resTOp << "\n");
+    auto contractOp = resTOp.getVector().getDefiningOp<vector::ContractionOp>();
+    if (!contractOp)
+      return failure();
+    LLVM_DEBUG(llvm::dbgs() << "contract: " << contractOp << "\n");
+
+    auto accTOp = contractOp.getAcc().getDefiningOp<vector::TransposeOp>();
+    if (!accTOp)
+      return failure();
+    LLVM_DEBUG(llvm::dbgs() << "acc transpose: " << accTOp << "\n");
+
+    MLIRContext *context = contractOp.getContext();
+    auto maps = llvm::to_vector<3>(contractOp.getIndexingMapsArray());
+    AffineMap contractMap = maps.back();
+
+    auto accTMap = AffineMap::getPermutationMap(
+        extractVector<unsigned>(accTOp.getTransp()), context);
+    LLVM_DEBUG(llvm::dbgs() << "acc map: " << accTMap << "\n");
+    auto combinedAccMap = inversePermutation(accTMap).compose(contractMap);
+    LLVM_DEBUG(llvm::dbgs() << "combined acc map: " << combinedAccMap << "\n");
+
+    auto resTMap = AffineMap::getPermutationMap(
+        extractVector<unsigned>(resTOp.getTransp()), context);
+    LLVM_DEBUG(llvm::dbgs() << "result map: " << resTMap << "\n");
+    auto combinedResMap = resTMap.compose(contractMap);
+    LLVM_DEBUG(llvm::dbgs()
+               << "combined result map: " << combinedResMap << "\n");
+
+    // The accumulator and result share the same indexing map.
+    if (combinedAccMap != combinedResMap)
+      return failure();
+    maps.back() = combinedAccMap;
+
+    rewriter.replaceOpWithNewOp<vector::ContractionOp>(
+        resTOp, contractOp.getLhs(), contractOp.getRhs(), accTOp.getVector(),
         rewriter.getAffineMapArrayAttr(maps), contractOp.getIteratorTypes());
     return success();
   }
@@ -1233,7 +1277,7 @@ struct ReorderCastOpsOnBroadcast
 
 /// Reorders elementwise(transpose) to transpose(elementwise). This makes
 /// transpose ops and contraction ops closer, which kicks in
-/// CombineContractTranspose pattern when elementwise ops are between these
+/// CombineContractABTranspose pattern when elementwise ops are between these
 /// operations. Ex:
 /// ```
 /// %at = vector.transpose %a, [1, 0]: vector<4x2xf32> to vector<2x4xf32>
@@ -2939,9 +2983,9 @@ void mlir::vector::populateVectorTransposeLoweringPatterns(
 void mlir::vector::populateVectorReductionToContractPatterns(
     RewritePatternSet &patterns, PatternBenefit benefit) {
   patterns.add<MultiReduceToContract, CombineContractBroadcast,
-               CombineContractTranspose, ReorderCastOpsOnBroadcast,
-               ReorderElementwiseOpsOnTranspose>(patterns.getContext(),
-                                                 benefit);
+               CombineContractABTranspose, CombineContractResultTranspose,
+               ReorderCastOpsOnBroadcast, ReorderElementwiseOpsOnTranspose>(
+      patterns.getContext(), benefit);
 }
 
 void mlir::vector::
