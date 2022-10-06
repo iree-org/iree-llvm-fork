@@ -235,40 +235,39 @@ struct TestVectorTransposeLowering
   }
 
   void runOnOperation() override {
-    func::FuncOp funcOp = getOperation();
-    MLIRContext *context = funcOp.getContext();
-    RewritePatternSet patterns(context);
+    RewritePatternSet patterns(&getContext());
 
-    vector::VectorTransformsOptions vectorTransformOptions;
+    // Test on one pattern in isolation.
+    // Explicitly disable shape_cast lowering.
+    LinalgVectorLoweringOptions options = LinalgVectorLoweringOptions()
+                                              .enableVectorTransposeLowering()
+                                              .enableShapeCastLowering(false);
     if (lowerToEltwise) {
-      vectorTransformOptions =
-          vectorTransformOptions.setVectorTransposeLowering(
-              VectorTransposeLowering::EltWise);
+      options = options.setVectorTransformsOptions(
+          VectorTransformsOptions().setVectorTransposeLowering(
+              VectorTransposeLowering::EltWise));
     }
     if (lowerToFlatTranspose) {
-      vectorTransformOptions =
-          vectorTransformOptions.setVectorTransposeLowering(
-              VectorTransposeLowering::Flat);
+      options = options.setVectorTransformsOptions(
+          VectorTransformsOptions().setVectorTransposeLowering(
+              VectorTransposeLowering::Flat));
     }
     if (lowerToShuffleTranspose) {
-      vectorTransformOptions =
-          vectorTransformOptions.setVectorTransposeLowering(
-              VectorTransposeLowering::Shuffle);
+      options = options.setVectorTransformsOptions(
+          VectorTransformsOptions().setVectorTransposeLowering(
+              VectorTransposeLowering::Shuffle));
     }
-    vector::populateVectorTransposeLoweringPatterns(patterns,
-                                                    vectorTransformOptions);
-
     if (lowerToAvx2) {
-      auto avx2LoweringOptions =
+      options = options.enableAVX2Lowering().setAVX2LoweringOptions(
           x86vector::avx2::LoweringOptions().setTransposeOptions(
               x86vector::avx2::TransposeLoweringOptions()
                   .lower4x8xf32()
-                  .lower8x8xf32());
-      x86vector::avx2::populateSpecializedTransposeLoweringPatterns(
-          patterns, avx2LoweringOptions, /*benefit=*/10);
+                  .lower8x8xf32()));
     }
 
-    if (failed(applyPatternsAndFoldGreedily(funcOp, std::move(patterns))))
+    OpPassManager dynamicPM("func.func");
+    dynamicPM.addPass(createLinalgStrategyLowerVectorsPass(options));
+    if (failed(runPipeline(dynamicPM, getOperation())))
       return signalPassFailure();
   }
 };
