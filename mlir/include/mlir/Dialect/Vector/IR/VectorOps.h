@@ -78,6 +78,9 @@ void populateShapeCastFoldingPatterns(RewritePatternSet &patterns,
 void populateCastAwayVectorLeadingOneDimPatterns(RewritePatternSet &patterns,
                                                  PatternBenefit benefit = 1);
 
+void populateCastAwayVectorTrailingOneDimPatterns(RewritePatternSet &patterns,
+                                                  PatternBenefit benefit = 1);
+
 /// Collect a set of one dimension removal patterns.
 ///
 /// These patterns insert rank-reducing memref.subview ops to remove one
