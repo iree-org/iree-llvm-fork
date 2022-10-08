@@ -13,6 +13,11 @@
 #include "mlir/IR/PatternMatch.h"
 
 namespace mlir {
+
+namespace scf {
+class ForOp;
+} // namespace scf
+
 namespace tensor {
 
 /// Populates `patterns` with patterns to wrap a tensor.pad op with an scf.if op
@@ -39,6 +44,16 @@ void populateMergeConsecutiveInsertExtractSlicePatterns(
 /// Collects patterns to update tensor.extract_slice to extract from the
 /// destination tensor of its producer tensor.insert_slice op.
 void populateExtractFromInsertSliceDestOpPatterns(RewritePatternSet &patterns);
+
+/// Hoists pairing tensor.extract_slice/insert_slice ops out of scf.for loops
+/// when possible. The slice op pair should have matching loop invairant
+/// offsets/sizes/strides; they should extract from and insert into the same
+/// loop carried value.
+scf::ForOp hoistTensorExtractInsertSliceOps(scf::ForOp forOp,
+                                            OpBuilder &builder);
+/// Collects patterns to hoist pairing tensor.extract_slice/insert_slice ops
+/// out of scf.for loops when possible. This wraps the above utility function.
+void populateHoistExtractInsertSliceOpPatterns(RewritePatternSet &patterns);
 
 } // namespace tensor
 } // namespace mlir

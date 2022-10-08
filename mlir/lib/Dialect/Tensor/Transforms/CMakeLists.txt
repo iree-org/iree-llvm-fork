@@ -3,6 +3,7 @@ add_mlir_dialect_library(MLIRTensorTransforms
   Bufferize.cpp
   ExtractFromInsertSliceDestPatterns.cpp
   ExtractSliceFromReshapeUtils.cpp
+  HoistExtractInsertSlicePatterns.cpp
   MergeConsecutiveInsertExtractSlicePatterns.cpp
   SplitPaddingPatterns.cpp
   SwapExtractSliceWithProducerPatterns.cpp
@@ -23,6 +24,7 @@ add_mlir_dialect_library(MLIRTensorTransforms
   MLIRMemRefDialect
   MLIRPass
   MLIRSCFDialect
+  MLIRSCFUtils
   MLIRTensorDialect
   MLIRTilingInterface
   MLIRTransforms

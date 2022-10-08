@@ -65,6 +65,12 @@ struct TestTensorTransforms
                      "destination tensor"),
       llvm::cl::init(false)};
 
+  Option<bool> testHoistExtractInsertSlice{
+      *this, "test-hoist-extract-insert-slice",
+      llvm::cl::desc("Test hoisting tensor.insert_slice/tensor.extract_slice "
+                     "out of loops"),
+      llvm::cl::init(false)};
+
   Option<bool> testRewriteExtractSliceWithTiledCollapseShape{
       *this, "test-rewrite-extract-slice-from-collapse-shape",
       llvm::cl::desc("Test swapping tensor.extract_slice of a collapse_shape "
@@ -111,6 +117,16 @@ static void applyFoldConsecutiveInsertExtractSlicePatterns(Operation *rootOp) {
 static void applyExtractFromInsertSliceDestPatterns(Operation *rootOp) {
   RewritePatternSet patterns(rootOp->getContext());
   tensor::populateExtractFromInsertSliceDestOpPatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(rootOp, std::move(patterns));
+}
+
+static void applyHoistExtractInsertSlicePatterns(Operation *rootOp) {
+  MLIRContext *ctx = rootOp->getContext();
+  RewritePatternSet patterns(ctx);
+  tensor::populateHoistExtractInsertSliceOpPatterns(patterns);
+  tensor::InsertSliceOp::getCanonicalizationPatterns(patterns, ctx);
+  tensor::ExtractSliceOp::getCanonicalizationPatterns(patterns, ctx);
+  scf::ForOp::getCanonicalizationPatterns(patterns, ctx);
   (void)applyPatternsAndFoldGreedily(rootOp, std::move(patterns));
 }
 
@@ -261,6 +277,8 @@ void TestTensorTransforms::runOnOperation() {
     applyFoldConsecutiveInsertExtractSlicePatterns(rootOp);
   if (testExtractFrominsertSliceDest)
     applyExtractFromInsertSliceDestPatterns(rootOp);
+  if (testHoistExtractInsertSlice)
+    applyHoistExtractInsertSlicePatterns(rootOp);
   if (testRewriteExtractSliceWithTiledCollapseShape) {
     if (failed(
             applyRewriteExtractFromCollapseShapePatterns(rootOp, useForeach)))
