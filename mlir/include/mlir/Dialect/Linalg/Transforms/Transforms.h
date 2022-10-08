@@ -788,20 +788,19 @@ struct DownscaleDepthwiseConv2DNhwcHwcOp final
 /// Linalg tile and fuse tensor ops pattern.
 ///
 /// Apply tiling and fusion as a pattern.
-/// `filter` controls LinalgTransformMarker matching and update when specified.
 /// See `tileConsumerAndFuseProducers` for more details.
 struct LinalgTileAndFuseTensorOpsPattern : public RewritePattern {
   // Entry point to match any LinalgOp.
-  LinalgTileAndFuseTensorOpsPattern(
-      MLIRContext *context, LinalgTilingAndFusionOptions options,
-      LinalgTransformationFilter f = LinalgTransformationFilter(),
-      PatternBenefit benefit = 1);
+  LinalgTileAndFuseTensorOpsPattern(MLIRContext *context,
+                                    LinalgTilingAndFusionOptions options,
+                                    PatternBenefit benefit = 1)
+      : RewritePattern(MatchAnyOpTypeTag(), benefit, context),
+        options(std::move(options)) {}
   // Entry point to match a specific LinalgOp.
-  LinalgTileAndFuseTensorOpsPattern(
-      StringRef opName, MLIRContext *context,
-      LinalgTilingAndFusionOptions options,
-      LinalgTransformationFilter f = LinalgTransformationFilter(),
-      PatternBenefit benefit = 1);
+  LinalgTileAndFuseTensorOpsPattern(StringRef opName, MLIRContext *context,
+                                    LinalgTilingAndFusionOptions options,
+                                    PatternBenefit benefit = 1)
+      : RewritePattern(opName, benefit, context), options(std::move(options)) {}
 
   /// `matchAndRewrite` implementation that returns the significant transformed
   /// pieces of IR.
@@ -814,8 +813,6 @@ struct LinalgTileAndFuseTensorOpsPattern : public RewritePattern {
   }
 
 private:
-  /// LinalgTransformMarker handles special attribute manipulations.
-  LinalgTransformationFilter filter;
   /// Tile sizes and interchange used to tile the root operation.
   LinalgTilingAndFusionOptions options;
 };

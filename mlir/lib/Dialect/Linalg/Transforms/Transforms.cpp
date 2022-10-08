@@ -447,30 +447,11 @@ mlir::linalg::LinalgPaddingPattern::returningMatchAndRewrite(
   return paddedOp;
 }
 
-/// Linalg tile and fuse tensor ops pattern.
-mlir::linalg::LinalgTileAndFuseTensorOpsPattern::
-    LinalgTileAndFuseTensorOpsPattern(MLIRContext *context,
-                                      LinalgTilingAndFusionOptions options,
-                                      LinalgTransformationFilter f,
-                                      PatternBenefit benefit)
-    : RewritePattern(MatchAnyOpTypeTag(), benefit, context),
-      filter(std::move(f)), options(std::move(options)) {}
-
-mlir::linalg::LinalgTileAndFuseTensorOpsPattern::
-    LinalgTileAndFuseTensorOpsPattern(StringRef opName, MLIRContext *context,
-                                      LinalgTilingAndFusionOptions options,
-                                      LinalgTransformationFilter f,
-                                      PatternBenefit benefit)
-    : RewritePattern(opName, benefit, context), filter(std::move(f)),
-      options(std::move(options)) {}
-
 FailureOr<mlir::linalg::TileLoopNest>
 mlir::linalg::LinalgTileAndFuseTensorOpsPattern::returningMatchAndRewrite(
     Operation *op, PatternRewriter &rewriter) const {
   LinalgOp rootOp = dyn_cast<LinalgOp>(op);
   if (!rootOp)
-    return failure();
-  if (failed(filter.checkAndNotify(rewriter, op)))
     return failure();
 
   // Check `tileSizes` contains a tile size for every `rootOp` loop dimension.
@@ -517,9 +498,6 @@ mlir::linalg::LinalgTileAndFuseTensorOpsPattern::returningMatchAndRewrite(
   // Replace all uses of the tiled loop operation.
   rootOp->replaceAllUsesWith(tileLoopNest->getRootOpReplacementResults());
 
-  // Apply the filter if specified.
-  for (LinalgOp linalgOp : tileLoopNest->getAllTiledAndFusedOps())
-    filter.replaceLinalgTransformationFilter(rewriter, linalgOp);
   return tileLoopNest;
 }
 
