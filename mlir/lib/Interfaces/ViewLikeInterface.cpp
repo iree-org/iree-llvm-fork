@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Interfaces/ViewLikeInterface.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace mlir;
 

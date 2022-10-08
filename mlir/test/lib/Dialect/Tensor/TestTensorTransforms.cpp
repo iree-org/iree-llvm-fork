@@ -59,6 +59,12 @@ struct TestTensorTransforms
           "Test folding consecutive tensor.insert_slice/tensor.extract_slice"),
       llvm::cl::init(false)};
 
+  Option<bool> testExtractFrominsertSliceDest{
+      *this, "test-extract-from-insert-slice-dest",
+      llvm::cl::desc("Test tensor.extract_slice from tensor.insert_slice "
+                     "destination tensor"),
+      llvm::cl::init(false)};
+
   Option<bool> testRewriteExtractSliceWithTiledCollapseShape{
       *this, "test-rewrite-extract-slice-from-collapse-shape",
       llvm::cl::desc("Test swapping tensor.extract_slice of a collapse_shape "
@@ -99,6 +105,12 @@ static void applyFoldConstantExtractSlicePatterns(Operation *rootOp) {
 static void applyFoldConsecutiveInsertExtractSlicePatterns(Operation *rootOp) {
   RewritePatternSet patterns(rootOp->getContext());
   tensor::populateMergeConsecutiveInsertExtractSlicePatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(rootOp, std::move(patterns));
+}
+
+static void applyExtractFromInsertSliceDestPatterns(Operation *rootOp) {
+  RewritePatternSet patterns(rootOp->getContext());
+  tensor::populateExtractFromInsertSliceDestOpPatterns(patterns);
   (void)applyPatternsAndFoldGreedily(rootOp, std::move(patterns));
 }
 
@@ -247,6 +259,8 @@ void TestTensorTransforms::runOnOperation() {
     applyFoldConstantExtractSlicePatterns(rootOp);
   if (testFoldConsecutiveInsertExtractSlice)
     applyFoldConsecutiveInsertExtractSlicePatterns(rootOp);
+  if (testExtractFrominsertSliceDest)
+    applyExtractFromInsertSliceDestPatterns(rootOp);
   if (testRewriteExtractSliceWithTiledCollapseShape) {
     if (failed(
             applyRewriteExtractFromCollapseShapePatterns(rootOp, useForeach)))

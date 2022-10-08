@@ -45,6 +45,22 @@ mergeOffsetsSizesAndStrides(OpBuilder &builder, Location loc,
                             SmallVector<OpFoldResult> &combinedSizes,
                             SmallVector<OpFoldResult> &combinedStrides);
 
+/// Returns true if the given two n-D ranges can be proven as disjoint.
+/// Returns false otherwise.
+///
+/// This function assumes all input arrays to have the same size.
+bool areDisjointRanges(ArrayRef<OpFoldResult> aOffsets,
+                       ArrayRef<OpFoldResult> aSizes,
+                       ArrayRef<OpFoldResult> bOffsets,
+                       ArrayRef<OpFoldResult> bSizes);
+
+/// Returns true if the given two slices can be proven as disjoint. Returns
+/// false otherwise.
+///
+/// This function assumes the two slices have the same rank.
+bool areDisjointSlices(OffsetSizeAndStrideOpInterface aSlice,
+                       OffsetSizeAndStrideOpInterface bSlice);
+
 } // namespace mlir
 
 #endif // MLIR_DIALECT_AFFINE_VIEWLIKEINTERFACEUTILS_H
