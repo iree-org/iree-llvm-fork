@@ -140,6 +140,15 @@ LogicalResult loopUnrollByFactor(
     scf::ForOp forOp, uint64_t unrollFactor,
     function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn = nullptr);
 
+/// Unrolls this for operation by the specified unroll factor. Returns failure
+/// if the loop cannot be unrolled either due to restrictions or due to invalid
+/// unroll factors. Requires positive loop bounds and step. If specified,
+/// annotates the Ops in each unrolled iteration by applying `annotateFn`.
+/// Uses the supplied OpsBuilder.
+LogicalResult loopUnrollByFactor(
+    scf::ForOp forOp, uint64_t unrollFactor, OpBuilder& boundsBuilder,
+    function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn = nullptr);
+
 /// Tile a nest of standard for loops rooted at `rootForOp` by finding such
 /// parametric tile sizes that the outer loops have a fixed number of iterations
 /// as defined in `sizes`.

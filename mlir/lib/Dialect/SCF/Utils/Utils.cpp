@@ -465,6 +465,16 @@ static void generateUnrolledLoop(
 LogicalResult mlir::loopUnrollByFactor(
     scf::ForOp forOp, uint64_t unrollFactor,
     function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn) {
+  OpBuilder boundsBuilder(forOp);
+  return mlir::loopUnrollByFactor(forOp, unrollFactor, boundsBuilder,
+                                  annotateFn);
+}
+  
+/// Unrolls 'forOp' by 'unrollFactor', returns success if the loop is unrolled
+/// using supplied OpBuilder.
+LogicalResult mlir::loopUnrollByFactor(
+    scf::ForOp forOp, uint64_t unrollFactor, OpBuilder& boundsBuilder,
+    function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn) {
   assert(unrollFactor > 0 && "expected positive unroll factor");
 
   // Return if the loop body is empty.
@@ -473,7 +483,6 @@ LogicalResult mlir::loopUnrollByFactor(
 
   // Compute tripCount = ceilDiv((upperBound - lowerBound), step) and populate
   // 'upperBoundUnrolled' and 'stepUnrolled' for static and dynamic cases.
-  OpBuilder boundsBuilder(forOp);
   auto loc = forOp.getLoc();
   Value step = forOp.getStep();
   Value upperBoundUnrolled;
