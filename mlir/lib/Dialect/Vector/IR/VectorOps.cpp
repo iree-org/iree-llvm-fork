@@ -3167,21 +3167,6 @@ void TransferReadOp::getEffects(
                          SideEffects::DefaultResource::get());
 }
 
-/// Returns true if all rank reduced in the given `extractOp` happen in leading
-/// dimensions earlier than last `trailingRank` dimensions.
-static bool areAllRankReducedLeadingDim(tensor::ExtractSliceOp extractOp,
-                                        unsigned trailingRank) {
-  // If no ranks are reduced at all, it's a degenerated case; always true.
-  if (extractOp.getSourceType().getRank() == extractOp.getType().getRank())
-    return true;
-
-  RankedTensorType inferredType = extractOp.inferResultType(
-      extractOp.getSourceType(), extractOp.getMixedOffsets(),
-      extractOp.getMixedSizes(), extractOp.getMixedStrides());
-  return extractOp.getType().getShape().take_back(trailingRank) ==
-         inferredType.getShape().take_back(trailingRank);
-}
-
 namespace {
 /// Fold transfer_reads of a tensor.extract_slice op. E.g.:
 ///
@@ -3220,44 +3205,69 @@ public:
     if (!extractOp.hasUnitStride())
       return failure();
 
+    const int64_t tensorSrcRank = extractOp.getSourceType().getRank();
+    const int64_t tensorDstRank = extractOp.getType().getRank();
+    const int64_t vectorRank = xferOp.getVectorType().getRank();
+
     // Bail on illegal rank-reduction: we need to check that the rank-reduced
     // dims are exactly the leading dims. I.e. the following is illegal:
-    // ```
+    // ```mlir
     //    %0 = tensor.extract_slice %t[0,0,0][2,1,4][1,1,1] :
     //      tensor<2x1x4xf32> to tensor<2x4xf32>
     //    %1 = vector.transfer_read %0[0,0], %cst :
     //      tensor<2x4xf32>, vector<2x4xf32>
     // ```
-    //
-    // Cannot fold into:
-    // ```
+    // As it cannot be fold into:
+    // ```mlir
     //    %0 = vector.transfer_read %t[0,0,0], %cst :
     //      tensor<2x1x4xf32>, vector<2x4xf32>
     // ```
-    // For this, check the trailing `vectorRank` dims of the extract_slice
-    // result tensor match the trailing dims of the inferred result tensor.
-    if (!areAllRankReducedLeadingDim(extractOp, extractOp.getType().getRank()))
-      return failure();
+    // Note that both the tensor.extract_slice and vector.transfer_read can be
+    // rank reducing. Thus, we need to check that none of the vector dims are
+    // ahead of any rank reduced tensor dims.
 
-    int64_t rankReduced =
-        extractOp.getSourceType().getRank() - extractOp.getType().getRank();
+    // Infer the extract_slice result tensor type (without trimming unit dims).
+    RankedTensorType inferredType = extractOp.inferResultType(
+        extractOp.getSourceType(), extractOp.getMixedOffsets(),
+        extractOp.getMixedSizes(), extractOp.getMixedStrides());
+
+    // Compute which dims are trimmed unit dims.
+    Optional<llvm::SmallDenseSet<unsigned>> trimmedDimMask =
+        computeRankReductionMask(inferredType.getShape(),
+                                 extractOp.getType().getShape());
+    if (!trimmedDimMask)
+      return rewriter.notifyMatchFailure(xferOp, "no rank reduction mask");
+
+    // Find the innermost trimmed dim.
+    int64_t innermostTrimmedDim = -1;
+    for (int64_t i = tensorSrcRank - 1; i >= 0; --i)
+      if (trimmedDimMask->contains(i)) {
+        innermostTrimmedDim = i;
+        break;
+      }
+
+    // Make sure the leading dim referenced by the vector result is not ahead of
+    // the innermost trimmed dim.
+    if (innermostTrimmedDim + 1 + vectorRank > tensorSrcRank)
+      return rewriter.notifyMatchFailure(xferOp, "illegal rank-reducing case");
 
     SmallVector<Value> newIndices;
-    // In case this is a rank-reducing ExtractSliceOp, copy rank-reduced
-    // indices first.
-    for (int64_t i = 0; i < rankReduced; ++i) {
-      OpFoldResult offset = extractOp.getMixedOffsets()[i];
-      newIndices.push_back(getValueOrCreateConstantIndexOp(
-          rewriter, extractOp.getLoc(), offset));
+    int64_t xferDimIndex = 0;
+    for (int64_t i = 0; i < tensorSrcRank; ++i) {
+      Value offset = getValueOrCreateConstantIndexOp(
+          rewriter, extractOp.getLoc(), extractOp.getMixedOffsets()[i]);
+      if (trimmedDimMask->contains(i)) {
+        // For unit dims trimmed by the extract_slice op, the index would
+        // directly be its original offset.
+        newIndices.push_back(offset);
+      } else {
+        // For other dims, we need to add the transfer_read's offset.
+        newIndices.push_back(rewriter.create<arith::AddIOp>(
+            xferOp->getLoc(), xferOp.getIndices()[xferDimIndex++], offset));
+      }
     }
-    for (const auto &it : llvm::enumerate(xferOp.getIndices())) {
-      OpFoldResult offset =
-          extractOp.getMixedOffsets()[it.index() + rankReduced];
-      newIndices.push_back(rewriter.create<arith::AddIOp>(
-          xferOp->getLoc(), it.value(),
-          getValueOrCreateConstantIndexOp(rewriter, extractOp.getLoc(),
-                                          offset)));
-    }
+    assert(xferDimIndex == tensorDstRank);
+
     SmallVector<bool> inBounds(xferOp.getTransferRank(), true);
     rewriter.replaceOpWithNewOp<TransferReadOp>(
         xferOp, xferOp.getVectorType(), extractOp.getSource(), newIndices,

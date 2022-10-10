@@ -1813,12 +1813,36 @@ func.func @insert_splat(%x : i32) -> vector<2x4x3xi32> {
 // -----
 
 // CHECK-LABEL: func.func @transfer_read_from_rank_reducing_extract_slice
-//       CHECK:   tensor.extract_slice
-//       CHECK:   vector.transfer_read
-func.func @transfer_read_from_rank_reducing_extract_slice(%src: tensor<1x8x8x8xf32>, %i1: index, %i2: index, %i3: index, %i4: index) -> vector<4xf32> {
+//  CHECK-SAME: (%[[SRC:.+]]: tensor<1x8x8x8xf32>, %[[I1:.+]]: index, %[[I2:.+]]: index, %[[I3:.+]]: index, %[[I4:.+]]: index, %[[I5:.+]]: index)
+//       CHECK:   %[[C0:.+]] = arith.constant 0 : index
+//       CHECK:   %[[OFFSET1:.+]] = arith.addi %[[I4]], %[[I1]] : index
+//       CHECK:   %[[OFFSET3:.+]] = arith.addi %[[I5]], %[[I3]] : index
+//       CHECK:   %[[READ:.+]] = vector.transfer_read %[[SRC]][%[[C0]], %[[OFFSET1]], %[[I2]], %[[OFFSET3]]]
+//       CHECK:   return %[[READ]]
+func.func @transfer_read_from_rank_reducing_extract_slice(
+    %src: tensor<1x8x8x8xf32>, %i1: index, %i2: index, %i3: index, %i4: index, %i5: index) -> vector<4xf32> {
   %c0 = arith.constant 0 : index
   %f0 = arith.constant 0.000000e+00 : f32
   %0 = tensor.extract_slice %src[0, %i1, %i2, %i3] [1, 4, 1, 4] [1, 1, 1, 1] : tensor<1x8x8x8xf32> to tensor<1x4x4xf32>
-  %1 = vector.transfer_read %0[%c0, %i4, %c0], %f0 {in_bounds = [true]} : tensor<1x4x4xf32>, vector<4xf32>
+  // We can fold this case given that the result dim#0 in transfer_read maps to
+  // dim#3 of the extract_slice source tensor; the innermost trimmed unit dim
+  // of extract_slice is dim#2.
+  %1 = vector.transfer_read %0[%c0, %i4, %i5], %f0 {in_bounds = [true]} : tensor<1x4x4xf32>, vector<4xf32>
   return %1 : vector<4xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @transfer_read_from_rank_reducing_extract_slice
+//       CHECK:   tensor.extract_slice
+//       CHECK:   vector.transfer_read
+func.func @transfer_read_from_rank_reducing_extract_slice(
+    %src: tensor<1x8x8x8xf32>, %i1: index, %i2: index, %i3: index, %i4: index, %i5: index) -> vector<2x4xf32> {
+  %c0 = arith.constant 0 : index
+  %f0 = arith.constant 0.000000e+00 : f32
+  %0 = tensor.extract_slice %src[0, %i1, %i2, %i3] [1, 4, 1, 4] [1, 1, 1, 1] : tensor<1x8x8x8xf32> to tensor<1x4x4xf32>
+  // We cannot fold this case because result dim#0 of the transfer_read maps to
+  // dim#1 of the extract_slice source tensor; but dim#2 is a trimmed unit dim.
+  %1 = vector.transfer_read %0[%c0, %i4, %i5], %f0 {in_bounds = [true, true]} : tensor<1x4x4xf32>, vector<2x4xf32>
+  return %1 : vector<2x4xf32>
 }
