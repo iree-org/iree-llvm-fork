@@ -18,36 +18,6 @@
 using namespace mlir;
 using namespace mlir::vector;
 
-/// Returns true if all rank reduced in the given `extractOp` happen in leading
-/// dimensions earlier than last `trailingRank` dimensions.
-static bool areAllRankReducedLeadingDim(tensor::ExtractSliceOp extractOp,
-                                        unsigned trailingRank) {
-  if (extractOp.getSourceType().getRank() == extractOp.getType().getRank())
-    return true;
-
-  RankedTensorType inferredType = extractOp.inferResultType(
-      extractOp.getSourceType(), extractOp.getMixedOffsets(),
-      extractOp.getMixedSizes(), extractOp.getMixedStrides());
-  return extractOp.getType().getShape().take_back(trailingRank) ==
-         inferredType.getShape().take_back(trailingRank);
-}
-
-/// Returns true if all rank reduced in the given `insertOp` happen in leading
-/// dimensions earlier than last `trailingRank` dimensions.
-static bool areAllRankReducedLeadingDim(tensor::InsertSliceOp insertOp,
-                                        unsigned trailingRank) {
-  // If no reduced ranks then simply return true.
-  if (insertOp.getSourceType().getRank() == insertOp.getDestType().getRank())
-    return true;
-
-  // Infer the small type by extracting from the large type.
-  RankedTensorType inferredType = tensor::ExtractSliceOp::inferResultType(
-      insertOp.getDestType(), insertOp.getMixedOffsets(),
-      insertOp.getMixedSizes(), insertOp.getMixedStrides());
-  return insertOp.getSourceType().getShape().take_back(trailingRank) ==
-         inferredType.getShape().take_back(trailingRank);
-}
-
 namespace {
 
 /// Reorders vector.transfer_write that are tensor.insert_slice source to be
@@ -99,21 +69,38 @@ struct ReorderTransferWriteAsInsertSource final
     // destination; 2) the extract and insert slice op has matching offsets,
     // sizes, and strides. This makes sure they can be folded away afterwards.
     if (extractOp.getSource() != insertOp.getDest())
-      return failure();
+      return rewriter.notifyMatchFailure(insertOp, "mismatched src/dest");
     const auto isSame = [](OpFoldResult a, OpFoldResult b) { return a == b; };
     if (!extractOp.isSameAs(insertOp, isSame))
       return rewriter.notifyMatchFailure(insertOp, "mismatched parameters");
 
-    // Make sure the transfer_write op has minor identity and all reduced rank
-    // are in leading dimensions. This avoid complicated rank reducing issues
-    // when swap the transfer and slice op.
-    int64_t largeTensorRank = insertOp.getType().getRank();
-    int64_t smallTensorRank = insertOp.getSourceType().getRank();
-    int64_t vectorRank = writeOp.getVectorType().getRank();
+    const int64_t largeTensorRank = insertOp.getType().getRank();
+    const int64_t smallTensorRank = insertOp.getSourceType().getRank();
+    const int64_t vectorRank = writeOp.getVectorType().getRank();
     if (!writeOp.getPermutationMap().isMinorIdentity())
       return rewriter.notifyMatchFailure(insertOp, "not minor identity map");
-    if (!areAllRankReducedLeadingDim(extractOp, smallTensorRank))
-      return rewriter.notifyMatchFailure(insertOp, "not leading rank reduced");
+
+    // Infer the extract/insert result tensor type (without trimming unit dims).
+    RankedTensorType inferredType = extractOp.inferResultType(
+        extractOp.getSourceType(), extractOp.getMixedOffsets(),
+        extractOp.getMixedSizes(), extractOp.getMixedStrides());
+    // Compute which dims are trimmed unit dims.
+    Optional<llvm::SmallDenseSet<unsigned>> trimmedDimMask =
+        computeRankReductionMask(inferredType.getShape(),
+                                 extractOp.getType().getShape());
+    if (!trimmedDimMask)
+      return rewriter.notifyMatchFailure(insertOp, "no rank reduction mask");
+    // Find the innermost trimmed dim.
+    int64_t innermostTrimmedDim = -1;
+    for (int64_t i = largeTensorRank - 1; i >= 0; --i)
+      if (trimmedDimMask->contains(i)) {
+        innermostTrimmedDim = i;
+        break;
+      }
+    // Make sure the leading dim referenced by the vector result is not ahead of
+    // the innermost trimmed dim.
+    if (innermostTrimmedDim + 1 + vectorRank > largeTensorRank)
+      return rewriter.notifyMatchFailure(insertOp, "unsupported rank-reducing");
 
     Location loc = insertOp.getLoc();
     auto newInsertOp = rewriter.create<tensor::InsertSliceOp>(
@@ -121,28 +108,31 @@ struct ReorderTransferWriteAsInsertSource final
         insertOp.getMixedOffsets(), insertOp.getMixedSizes(),
         insertOp.getMixedStrides());
 
-    // Prepend zeros to the indices to match the large tensor, if the extract
-    // slice op is rank reducing.
-    SmallVector<Value> newIndices;
-    newIndices.reserve(largeTensorRank);
-    int64_t reducedRank = largeTensorRank - smallTensorRank;
-    for (int i = 0; i < reducedRank; ++i) {
-      OpFoldResult offset = insertOp.getMixedOffsets()[i];
-      newIndices.push_back(
-          getValueOrCreateConstantIndexOp(rewriter, loc, offset));
-    }
     AffineExpr dim0, dim1;
     bindDims(getContext(), dim0, dim1);
-    for (int i = 0; i < smallTensorRank; ++i) {
-      OpFoldResult offset = insertOp.getMixedOffsets()[i + reducedRank];
-      Value offsetVal = getValueOrCreateConstantIndexOp(rewriter, loc, offset);
-      newIndices.push_back(makeComposedAffineApply(
-          rewriter, loc, dim0 + dim1, {writeOp.getIndices()[i], offsetVal}));
+
+    SmallVector<Value> newIndices;
+    newIndices.reserve(largeTensorRank);
+
+    int64_t transferDimIndex = 0;
+    for (int64_t i = 0; i < largeTensorRank; ++i) {
+      Value offset = getValueOrCreateConstantIndexOp(
+          rewriter, loc, insertOp.getMixedOffsets()[i]);
+      if (trimmedDimMask->contains(i)) {
+        // For unit dims trimmed by the extract/insert slice op, the index would
+        // directly be its original extract/insert offset.
+        newIndices.push_back(offset);
+      } else {
+        // For other dims, we need to add the transfer_write's offset.
+        newIndices.push_back(makeComposedAffineApply(
+            rewriter, loc, dim0 + dim1,
+            {writeOp.getIndices()[transferDimIndex++], offset}));
+      }
     }
+    assert(transferDimIndex == smallTensorRank);
 
     auto newMap = AffineMap::getMinorIdentityMap(largeTensorRank, vectorRank,
                                                  writeOp.getContext());
-
     rewriter.replaceOpWithNewOp<TransferWriteOp>(
         insertOp, writeOp.getVector(), newInsertOp.getResult(), newIndices,
         AffineMapAttr::get(newMap), writeOp.getMask(),
@@ -182,12 +172,9 @@ struct ReorderTransferWriteAsInsertDest final
 
     if (!insertOp.hasUnitStride())
       return rewriter.notifyMatchFailure(insertOp, "not unit stride");
-    if (!areAllRankReducedLeadingDim(insertOp,
-                                     insertOp.getSourceType().getRank()))
-      return rewriter.notifyMatchFailure(insertOp, "not leading rank reduced");
 
-    unsigned writeTensorRank = writeOp.getSource().getType().getRank();
-    unsigned writeReducedRank = writeOp.getLeadingShapedRank();
+    const unsigned writeTensorRank = writeOp.getSource().getType().getRank();
+    const unsigned writeReducedRank = writeOp.getLeadingShapedRank();
 
     SmallVector<OpFoldResult> writeOffsets;
     writeOffsets.reserve(writeTensorRank);
