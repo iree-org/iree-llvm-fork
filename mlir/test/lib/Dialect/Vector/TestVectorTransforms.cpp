@@ -20,6 +20,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/Vector/Transforms/VectorDistribution.h"
+#include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
 #include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -782,6 +783,29 @@ struct TestVectorDistribution
   }
 };
 
+struct TestVectorReoderTransfer
+    : public PassWrapper<TestVectorReoderTransfer,
+                         OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(TestVectorReoderTransfer)
+
+  StringRef getArgument() const final { return "test-vector-reorder-transfer"; }
+  StringRef getDescription() const final {
+    return "Test patterns reordering vector transfer ops tensor insert/extract "
+           "slice ops";
+  }
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<AffineDialect>();
+  }
+  void runOnOperation() override {
+    MLIRContext *ctx = &getContext();
+    RewritePatternSet patterns(ctx);
+    populateVectorReorderTransferExtractInsertSlicePatterns(patterns);
+    tensor::InsertSliceOp::getCanonicalizationPatterns(patterns, ctx);
+    tensor::ExtractSliceOp::getCanonicalizationPatterns(patterns, ctx);
+    (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
+  }
+};
+
 } // namespace
 
 namespace mlir {
@@ -816,6 +840,8 @@ void registerTestVectorLowerings() {
   PassRegistration<TestVectorScanLowering>();
 
   PassRegistration<TestVectorDistribution>();
+
+  PassRegistration<TestVectorReoderTransfer>();
 }
 } // namespace test
 } // namespace mlir
