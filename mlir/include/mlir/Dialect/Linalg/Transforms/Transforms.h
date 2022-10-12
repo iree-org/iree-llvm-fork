@@ -1035,7 +1035,6 @@ using ControlSplitReductionFn =
 void populateSplitReductionPattern(
     RewritePatternSet &patterns,
     const ControlSplitReductionFn &controlSplitReductionFn,
-    const LinalgTransformationFilter &f = LinalgTransformationFilter(),
     bool useAlloc = false);
 
 /// Apply transformation to split the single linalg op reduction into a parallel
@@ -1079,14 +1078,6 @@ void populateSplitReductionPattern(
 ///   linalg.yield %5 : f32
 /// } -> tensor<f32>
 /// ```
-FailureOr<LinalgOp>
-splitReduction(PatternRewriter &b, LinalgOp op,
-               const ControlSplitReductionFn &controlSplitReductionFn,
-               const LinalgTransformationFilter &f, bool useAlloc = false);
-
-/// Filterless version of the above.
-/// Returns both the new linalg ops as well as the fillOp needed to initialize
-/// the temporary expanded tensor with the proper neutral element.
 struct SplitReductionResult {
   Operation *initOrAlloc;
   FillOp fillOp;
