@@ -1182,9 +1182,9 @@ struct EraseIdentityGenericOp : public OpRewritePattern<GenericOp> {
 
 void GenericOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                             MLIRContext *context) {
-  results
-      .add<DeduplicateAndRemoveDeadOperandsAndResults, EraseIdentityGenericOp>(
-          context);
+  results.add<
+      // DeduplicateAndRemoveDeadOperandsAndResults,
+      EraseIdentityGenericOp>(context);
 }
 
 LogicalResult GenericOp::fold(ArrayRef<Attribute>,
