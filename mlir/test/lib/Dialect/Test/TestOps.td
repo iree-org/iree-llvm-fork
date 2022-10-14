@@ -716,8 +716,8 @@ def TestProducingBranchOp : TEST_Op<"producing_br",
 
 // Produces an error value on the error path
 def TestInternalBranchOp : TEST_Op<"internal_br",
-	[DeclareOpInterfaceMethods<BranchOpInterface>, Terminator,
-	 AttrSizedOperandSegments]> {
+    [DeclareOpInterfaceMethods<BranchOpInterface>, Terminator,
+     AttrSizedOperandSegments]> {
 
   let arguments = (ins Variadic<AnyType>:$successOperands,
                        Variadic<AnyType>:$errorOperands);
@@ -3023,4 +3023,20 @@ def TestReflectBoundsOp : TEST_Op<"reflect_bounds",
 
   let assemblyFormat = "attr-dict $value";
 }
+
+//===---------------------------------------------------------------------===//
+// Test CSE
+//===---------------------------------------------------------------------===//
+
+def TestCSEOfSingleBlockOp : TEST_Op<"cse_of_single_block_op",
+    [SingleBlockImplicitTerminator<"RegionYieldOp">, NoSideEffect]> {
+  let arguments = (ins Variadic<AnyType>:$inputs);
+  let results = (outs Variadic<AnyType>:$outputs);
+  let regions = (region SizedRegion<1>:$region);
+  let assemblyFormat = [{
+    attr-dict `inputs` `(` $inputs `)`
+    $region `:` type($inputs)  `->` type($outputs)
+  }];
+}
+
 #endif // TEST_OPS
