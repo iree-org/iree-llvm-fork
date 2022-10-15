@@ -362,7 +362,9 @@ struct ConvertAccessChain : public ConvertAliasResource<spirv::AccessChainOp> {
     }
 
     Location loc = acOp.getLoc();
-    auto i32Type = rewriter.getI32Type();
+    auto indices = llvm::to_vector<4>(acOp.getIndices());
+    Value oldIndex = indices.back();
+    Type indexType = oldIndex.getType();
 
     if (srcElemType.isIntOrFloat() && dstElemType.isa<VectorType>()) {
       // The source indices are for a buffer with scalar element types. Rewrite
@@ -372,16 +374,15 @@ struct ConvertAccessChain : public ConvertAliasResource<spirv::AccessChainOp> {
       int srcNumBytes = *srcElemType.getSizeInBytes();
       int dstNumBytes = *dstElemType.getSizeInBytes();
       assert(dstNumBytes >= srcNumBytes && dstNumBytes % srcNumBytes == 0);
+
       int ratio = dstNumBytes / srcNumBytes;
       auto ratioValue = rewriter.create<spirv::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(ratio));
+          loc, indexType, rewriter.getIntegerAttr(indexType, ratio));
 
-      auto indices = llvm::to_vector<4>(acOp.getIndices());
-      Value oldIndex = indices.back();
       indices.back() =
-          rewriter.create<spirv::SDivOp>(loc, i32Type, oldIndex, ratioValue);
+          rewriter.create<spirv::SDivOp>(loc, indexType, oldIndex, ratioValue);
       indices.push_back(
-          rewriter.create<spirv::SModOp>(loc, i32Type, oldIndex, ratioValue));
+          rewriter.create<spirv::SModOp>(loc, indexType, oldIndex, ratioValue));
 
       rewriter.replaceOpWithNewOp<spirv::AccessChainOp>(
           acOp, adaptor.getBasePtr(), indices);
@@ -398,12 +399,10 @@ struct ConvertAccessChain : public ConvertAliasResource<spirv::AccessChainOp> {
       assert(srcNumBytes >= dstNumBytes && srcNumBytes % dstNumBytes == 0);
       int ratio = srcNumBytes / dstNumBytes;
       auto ratioValue = rewriter.create<spirv::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(ratio));
+          loc, indexType, rewriter.getIntegerAttr(indexType, ratio));
 
-      auto indices = llvm::to_vector<4>(acOp.getIndices());
-      Value oldIndex = indices.back();
       indices.back() =
-          rewriter.create<spirv::IMulOp>(loc, i32Type, oldIndex, ratioValue);
+          rewriter.create<spirv::IMulOp>(loc, indexType, oldIndex, ratioValue);
 
       rewriter.replaceOpWithNewOp<spirv::AccessChainOp>(
           acOp, adaptor.getBasePtr(), indices);
@@ -462,13 +461,13 @@ struct ConvertLoad : public ConvertAliasResource<spirv::LoadOp> {
       if (!acOp)
         return rewriter.notifyMatchFailure(loadOp, "ptr not spirv.AccessChain");
 
-      auto i32Type = rewriter.getI32Type();
-      Value oneValue = spirv::ConstantOp::getOne(i32Type, loc, rewriter);
       auto indices = llvm::to_vector<4>(acOp.getIndices());
+      Type indexType = indices.back().getType();
+      Value oneValue = spirv::ConstantOp::getOne(indexType, loc, rewriter);
       for (int i = 1; i < ratio; ++i) {
         // Load all subsequent components belonging to this element.
         indices.back() = rewriter.create<spirv::IAddOp>(
-            loc, i32Type, indices.back(), oneValue);
+            loc, indexType, indices.back(), oneValue);
         auto componentAcOp = rewriter.create<spirv::AccessChainOp>(
             loc, acOp.getBasePtr(), indices);
         // Assuming little endian, this reads lower-ordered bits of the number
