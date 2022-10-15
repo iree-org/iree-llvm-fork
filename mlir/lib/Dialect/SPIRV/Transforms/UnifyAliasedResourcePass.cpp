@@ -380,9 +380,9 @@ struct ConvertAccessChain : public ConvertAliasResource<spirv::AccessChainOp> {
           loc, indexType, rewriter.getIntegerAttr(indexType, ratio));
 
       indices.back() =
-          rewriter.create<spirv::SDivOp>(loc, indexType, oldIndex, ratioValue);
+          rewriter.create<spirv::UDivOp>(loc, indexType, oldIndex, ratioValue);
       indices.push_back(
-          rewriter.create<spirv::SModOp>(loc, indexType, oldIndex, ratioValue));
+          rewriter.create<spirv::UModOp>(loc, indexType, oldIndex, ratioValue));
 
       rewriter.replaceOpWithNewOp<spirv::AccessChainOp>(
           acOp, adaptor.getBasePtr(), indices);
