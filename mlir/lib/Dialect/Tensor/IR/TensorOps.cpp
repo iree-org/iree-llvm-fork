@@ -2407,7 +2407,6 @@ void PadOp::build(OpBuilder &b, OperationState &result, Type resultType,
                   Value source, ArrayRef<OpFoldResult> low,
                   ArrayRef<OpFoldResult> high, bool nofold,
                   ArrayRef<NamedAttribute> attrs) {
-  assert(resultType.isa<RankedTensorType>());
   auto sourceType = source.getType().cast<RankedTensorType>();
   SmallVector<Value, 4> dynamicLow, dynamicHigh;
   SmallVector<int64_t, 4> staticLow, staticHigh;
@@ -2422,10 +2421,30 @@ void PadOp::build(OpBuilder &b, OperationState &result, Type resultType,
   if (!resultType) {
     resultType = PadOp::inferResultType(sourceType, staticLow, staticHigh);
   }
+  assert(resultType.isa<RankedTensorType>());
   build(b, result, resultType, source, dynamicLow, dynamicHigh,
         b.getI64ArrayAttr(staticLow), b.getI64ArrayAttr(staticHigh),
         nofold ? b.getUnitAttr() : UnitAttr());
   result.addAttributes(attrs);
+}
+
+void PadOp::build(OpBuilder &b, OperationState &result, Type resultType,
+                  Value source, ArrayRef<OpFoldResult> low,
+                  ArrayRef<OpFoldResult> high, Value constantPadValue,
+                  bool nofold, ArrayRef<NamedAttribute> attrs) {
+  build(b, result, resultType, source, low, high, nofold, attrs);
+
+  // Add a region and a block to yield the pad value.
+  Region *region = result.regions[0].get();
+  region->push_back(new Block);
+  Block &body = region->front();
+  for (auto dim : llvm::seq<unsigned>(
+           0, source.getType().cast<RankedTensorType>().getRank())) {
+    body.addArgument(b.getIndexType(), result.location);
+  }
+  OpBuilder::InsertionGuard guard(b);
+  b.setInsertionPointToStart(&body);
+  b.create<tensor::YieldOp>(result.location, constantPadValue);
 }
 
 llvm::SmallBitVector PadOp::getPaddedDims() {
