@@ -136,28 +136,34 @@ generateTileLoopNest(OpBuilder &builder, Location loc,
         getValueOrCreateConstantIndexOp(builder, loc, loopRange.value().offset);
     Value size =
         getValueOrCreateConstantIndexOp(builder, loc, loopRange.value().size);
+    Value tileSize = tileSizeVals[loopRange.index()];
     // No loops if tile size is zero. Set offset and size to the loop
     // offset and size.
-    if (matchPattern(tileSizeVals[loopRange.index()], m_Zero())) {
+    if (matchPattern(tileSize, m_Zero())) {
       offsets[loopRange.index()] = offset;
       sizes[loopRange.index()] = size;
       continue;
     }
 
     auto loop = builder.create<scf::ForOp>(
-        loc, offset, size, tileSizeVals[loopRange.index()], ValueRange{},
+        loc, offset, size, tileSize, ValueRange{},
         [&](OpBuilder &bodyBuilder, Location bodyLoc, Value iv,
             ValueRange /*iterArgs*/) {
-          bool canAvoidMap = tileDividesIterationDomain(
-              Range{loopRange.value().offset, loopRange.value().size,
-                    tileSizeVals[loopRange.index()]});
-          Value boundedTileSize =
-              (canAvoidMap)
-                  ? tileSizeVals[loopRange.index()]
-                  : builder.create<AffineMinOp>(
-                        bodyLoc, minMap,
-                        ValueRange{iv, tileSizeVals[loopRange.index()], size});
-          sizes[loopRange.index()] = boundedTileSize;
+          Optional<int64_t> ts = getConstantIntValue(tileSize);
+          if (ts && ts.value() == 1) {
+            // Do nothing because the boundary is always 1 when tiling with
+            // size 1.
+            sizes[loopRange.index()] = getAsOpFoldResult(tileSize);
+          } else {
+            bool canAvoidMap = tileDividesIterationDomain(Range{
+                loopRange.value().offset, loopRange.value().size, tileSize});
+            Value boundedTileSize =
+                (canAvoidMap)
+                    ? tileSize
+                    : builder.create<AffineMinOp>(
+                          bodyLoc, minMap, ValueRange{iv, tileSize, size});
+            sizes[loopRange.index()] = boundedTileSize;
+          }
           builder.create<scf::YieldOp>(loc);
         });
     offsets[loopRange.index()] = loop.getInductionVar();
