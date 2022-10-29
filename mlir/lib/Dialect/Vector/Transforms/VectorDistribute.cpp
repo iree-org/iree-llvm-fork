@@ -1062,10 +1062,12 @@ struct WarpOpReduction : public OpRewritePattern<WarpExecuteOnLane0Op> {
           warpOp, "Reduction vector dimension must match was size.");
     // Only f32 and i32 element types are supported.
     if (!reductionOp.getType().isF32() &&
-        !reductionOp.getType().isSignlessInteger(32))
-      return rewriter.notifyMatchFailure(
-          warpOp,
-          "Reduction distribution currently only supports 32bits types.");
+        !reductionOp.getType().isSignlessInteger(32) &&
+        !reductionOp.getType().isF16() &&
+        !reductionOp.getType().isSignlessInteger(16))
+      return rewriter.notifyMatchFailure(warpOp,
+                                         "Reduction distribution currently "
+                                         "only supports 16 and 32 bits types.");
 
     int64_t numElements = vectorType.getShape()[0] / warpOp.getWarpSize();
     // Return vector that will be reduced from the WarpExecuteOnLane0Op.
