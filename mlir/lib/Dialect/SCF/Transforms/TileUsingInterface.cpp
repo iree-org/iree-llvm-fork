@@ -111,6 +111,7 @@ static OpFoldResult getBoundedTileSize(OpBuilder &b, Location loc,
                                        Range loopRange, Value iv,
                                        Value tileSize) {
   Optional<int64_t> ts = getConstantIntValue(tileSize);
+  if (ts) printf("%d\n", (int)ts.value());
   if (ts && ts.value() == 1)
     return getAsOpFoldResult(tileSize);
 
@@ -360,11 +361,7 @@ mlir::scf::tileUsingSCFForOp(RewriterBase &rewriter, TilingInterface op,
         tilingResult.loops.back().getBody()->getTerminator());
   SmallVector<Operation *> tiledImplementation =
       op.getTiledImplementation(rewriter, offsets, sizes);
-  if (tiledImplementation.size() != 1) {
-    return rewriter.notifyMatchFailure(
-        op, "expected tiled implementation to return a single op");
-  }
-  tilingResult.tiledOp = tiledImplementation[0];
+  tilingResult.tiledOps.append(tiledImplementation);
   if (op->getNumResults() == 0) {
     // nothing more to do.
     return tilingResult;
@@ -396,13 +393,13 @@ mlir::scf::tileUsingSCFForOp(RewriterBase &rewriter, TilingInterface op,
   }
 
   FailureOr<SmallVector<Value>> replacementOr = yieldTiledValues(
-      rewriter, destinationTensors, tilingResult.tiledOp->getResults(),
+      rewriter, destinationTensors, tilingResult.tiledOps.back()->getResults(),
       resultOffsetsList, resultSizesList, tilingResult.loops);
   if (failed(replacementOr))
     return rewriter.notifyMatchFailure(op, "failed to yield replacement");
 
   if (auto dstOp =
-          dyn_cast<DestinationStyleOpInterface>(tilingResult.tiledOp)) {
+          dyn_cast<DestinationStyleOpInterface>(tilingResult.tiledOps.back())) {
     auto innerMostLoop = tilingResult.loops.back();
     SmallVector<Value> destinationTensors = dstOp.getDpsInitOperands();
     assert(destinationTensors.size() ==
@@ -470,13 +467,14 @@ mlir::scf::tileConsumerAndFuseProducerGreedilyUsingSCFForOp(
         tileUsingSCFForOp(rewriter, consumer, options.tilingOptions);
     if (failed(tilingResult))
       return rewriter.notifyMatchFailure(consumer, "failed to tile consumer");
-    tileAndFuseResult.tiledAndFusedOps.insert(tilingResult->tiledOp);
+    for (auto tiledOp : tilingResult->tiledOps)
+      tileAndFuseResult.tiledAndFusedOps.insert(tiledOp);
     tileAndFuseResult.loops = std::move(tilingResult->loops);
     for (const auto &result : llvm::enumerate(
              llvm::zip(consumer->getResults(), tilingResult->replacements))) {
       tileAndFuseResult.replacements[std::get<0>(result.value())] =
           std::get<1>(result.value());
-      yieldedValueToResultNumber[tilingResult->tiledOp->getResult(
+      yieldedValueToResultNumber[tilingResult->tiledOps.back()->getResult(
           result.index())] = result.index();
     }
   }
