@@ -796,6 +796,9 @@ def TileToForeachThreadOp :
     If non-empty, the `mapping` is added as an attribute to the
     resulting `scf.foreach_thread`.
 
+    Note: tile_sizes and num_threads handles can refer top multiple ops and are
+    thus unpacked dynamically.
+
     #### Return modes
 
     This operation ignores ops that do not implement the TilingInterface and
@@ -857,7 +860,7 @@ def TileToForeachThreadOp :
                    "ArrayRef<OpFoldResult>":$mixedNumThreads,
                    CArg<"::mlir::transform::NumThreadsSpec", 
                         "::mlir::transform::NumThreadsSpec()">,
-                   CArg<"ArrayAttr", "{}">:$mapping)>,
+                   CArg<"ArrayAttr", "{}">:$mapping)>
   ];
 
   let assemblyFormat = [{
