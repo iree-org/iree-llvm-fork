@@ -707,6 +707,10 @@ def TileToForeachThreadOp :
     If non-empty, the `thread_dim_mapping` is added as an attribute to the
     resulting `scf.foreach_thread`.
 
+    A `packed_sizes` unit attribute may be specified that controls whether the
+    `num_threads` or `tile_sizes` specification refers to a handle that contains
+    multiple PDL_Operation values that are unpacked dynamically.
+
     #### Return modes
 
     This operation ignores ops that do not implement the TilingInterface and
@@ -736,6 +740,13 @@ def TileToForeachThreadOp :
     %0 = pdl_match @match_matmul in %arg1
     %sz = pdl_match @match_size_op in %arg1
     %3:2 = transform.structured.tile_to_foreach_thread_op %0 tile_sizes [0, %sz, 20]
+
+    #### Example using `tile_sizes` and `packed_sizes`
+
+    ```
+    %0 = pdl_match @match_matmul in %arg1
+    %sz = pdl_match @match_multiple_size_ops in %arg1
+    %3:2 = transform.structured.tile_to_foreach_thread_op %0 tile_sizes [%sz]
     ```
   }];
 
@@ -744,7 +755,8 @@ def TileToForeachThreadOp :
                    Variadic<PDL_Operation>:$tile_sizes,
                    DefaultValuedAttr<I64ArrayAttr, "{}">:$static_num_threads,
                    DefaultValuedAttr<I64ArrayAttr, "{}">:$static_tile_sizes,
-                   OptionalAttr<I64ArrayAttr>:$thread_dim_mapping);
+                   OptionalAttr<I64ArrayAttr>:$thread_dim_mapping,
+                   UnitAttr:$packed_sizes);
   let results = (outs PDL_Operation:$foreach_thread_op,
                       PDL_Operation:$tiled_op);
 
@@ -760,12 +772,22 @@ def TileToForeachThreadOp :
                         "::mlir::transform::TileSizesSpec()">,
                    CArg<"ArrayRef<int64_t>", "{}">:$threadDimMapping)>,
     OpBuilder<(ins "Value":$target,
+                   "Value":$packedTileSizesHandle,
+                   CArg<"::mlir::transform::TileSizesSpec",
+                        "::mlir::transform::TileSizesSpec()">,
+                   CArg<"ArrayRef<int64_t>", "{}">:$threadDimMapping)>,
+    OpBuilder<(ins "Value":$target,
                    "ArrayRef<int64_t>":$staticNumThreads,
                    CArg<"::mlir::transform::NumThreadsSpec", 
                         "::mlir::transform::NumThreadsSpec()">,
                    CArg<"ArrayRef<int64_t>", "{}">:$threadDimMapping)>,
     OpBuilder<(ins "Value":$target,
                    "ArrayRef<OpFoldResult>":$mixedNumThreads,
+                   CArg<"::mlir::transform::NumThreadsSpec", 
+                        "::mlir::transform::NumThreadsSpec()">,
+                   CArg<"ArrayRef<int64_t>", "{}">:$threadDimMapping)>,
+    OpBuilder<(ins "Value":$target,
+                   "Value":$packedNumThreadsHandle,
                    CArg<"::mlir::transform::NumThreadsSpec", 
                         "::mlir::transform::NumThreadsSpec()">,
                    CArg<"ArrayRef<int64_t>", "{}">:$threadDimMapping)>,

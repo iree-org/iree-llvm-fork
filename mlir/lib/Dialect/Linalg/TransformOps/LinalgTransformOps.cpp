@@ -19,6 +19,7 @@
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/Transform/IR/TransformDialect.h"
 #include "mlir/Dialect/Transform/IR/TransformInterfaces.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/TilingInterface.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/StringSet.h"
@@ -1328,6 +1329,30 @@ void transform::TileToForeachThreadOp::build(
 
 void transform::TileToForeachThreadOp::build(
     OpBuilder &builder, OperationState &result, Value target,
+    Value packedTileSizesHandle, transform::TileSizesSpec,
+    ArrayRef<int64_t> threadDimMapping) {
+  // Call the default builder which sets up the proper operands segment sizes
+  // attributes for multiple variadic operands. In the absence of this, horrible
+  // bugs ensue.
+  MLIRContext *ctx = builder.getContext();
+  auto operationType = pdl::OperationType::get(ctx);
+  ArrayAttr threadDimMappingAttr;
+  if (!threadDimMapping.empty())
+    threadDimMappingAttr = builder.getI64ArrayAttr(threadDimMapping);
+  build(builder, result,
+        /*resultTypes=*/TypeRange{operationType, operationType},
+        /*target=*/target,
+        /*numThreads=*/ValueRange{},
+        /*tileSizes=*/ValueRange{packedTileSizesHandle},
+        /*staticNumThreads=*/ArrayAttr(),
+        /*staticTileSizes=*/
+        builder.getI64ArrayAttr(ShapedType::kDynamicSize),
+        /*threadDimMapping=*/threadDimMappingAttr,
+        /*packedSizes=*/builder.getUnitAttr());
+}
+
+void transform::TileToForeachThreadOp::build(
+    OpBuilder &builder, OperationState &result, Value target,
     ArrayRef<int64_t> staticNumThreads, transform::NumThreadsSpec,
     ArrayRef<int64_t> threadDimMapping) {
   return build(builder, result, target,
@@ -1355,6 +1380,30 @@ void transform::TileToForeachThreadOp::build(
   build(builder, result, TypeRange{operationType, operationType}, target,
         dynamicNumThreads, /*tileSizes=*/ValueRange{}, staticNumThreadsAttr,
         /*staticTileSizes=*/ArrayAttr(), threadDimMappingAttr);
+}
+
+void transform::TileToForeachThreadOp::build(
+    OpBuilder &builder, OperationState &result, Value target,
+    Value packedNumThreadsHandle, transform::NumThreadsSpec,
+    ArrayRef<int64_t> threadDimMapping) {
+  // Call the default builder which sets up the proper operands segment sizes
+  // attributes for multiple variadic operands. In the absence of this, horrible
+  // bugs ensue.
+  MLIRContext *ctx = builder.getContext();
+  auto operationType = pdl::OperationType::get(ctx);
+  ArrayAttr threadDimMappingAttr;
+  if (!threadDimMapping.empty())
+    threadDimMappingAttr = builder.getI64ArrayAttr(threadDimMapping);
+  build(builder, result,
+        /*resultTypes=*/TypeRange{operationType, operationType},
+        /*target=*/target,
+        /*numThreads=*/ValueRange{packedNumThreadsHandle},
+        /*tileSizes=*/ValueRange{},
+        /*staticNumThreads=*/
+        builder.getI64ArrayAttr(ShapedType::kDynamicSize),
+        /*staticTileSizes=*/ArrayAttr(),
+        /*threadDimMapping=*/threadDimMappingAttr,
+        /*packedSizes=*/builder.getUnitAttr());
 }
 
 DiagnosedSilenceableFailure transform::tileToForeachThreadOpImpl(
@@ -1465,13 +1514,43 @@ DiagnosedSilenceableFailure transform::TileToForeachThreadOp::apply(
   SmallVector<Operation *> tileOps;
   SmallVector<Operation *> tiledOps;
 
+  SmallVector<OpFoldResult> mixedTileSizes, mixedNumThreads;
+  if (getPackedSizes()) {
+    bool isPackedTileSizes = !getTileSizes().empty();
+    ArrayRef<Operation *> sizes =
+        isPackedTileSizes ? state.getPayloadOps(getTileSizes().front())
+                          : state.getPayloadOps(getNumThreads().front());
+    SmallVector<OpFoldResult> unpackedMixedSizes;
+    unpackedMixedSizes.reserve(sizes.size());
+    for (Operation *sizeProducer : sizes) {
+      if (sizeProducer->getNumResults() != 1) {
+        auto diag = mlir::emitDefiniteFailure(sizeProducer)
+                    << "the operation producing tile size must have one result";
+        diag.attachNote(getLoc()) << "when applying this transform";
+        return diag;
+      }
+      // TODO: we may want to pattern-match for integer constants here.
+      unpackedMixedSizes.push_back(sizeProducer->getResult(0));
+    }
+    if (isPackedTileSizes)
+      mixedTileSizes = unpackedMixedSizes;
+    else
+      mixedNumThreads = unpackedMixedSizes;
+  } else {
+    mixedTileSizes = getMixedTileSizes();
+    mixedNumThreads = getMixedNumThreads();
+  }
+
   DiagnosedSilenceableFailure diag = tileToForeachThreadOpImpl(
       rewriter, state, cast<TransformOpInterface>(getOperation()), targets,
-      getMixedNumThreads(), getMixedTileSizes(), getThreadDimMapping(), tileOps,
+      mixedNumThreads, mixedTileSizes, getThreadDimMapping(), tileOps,
       tiledOps);
 
-  if (!diag.succeeded())
+  if (!diag.succeeded()) {
+    transformResults.set(getForeachThreadOp().cast<OpResult>(), {});
+    transformResults.set(getTiledOp().cast<OpResult>(), {});
     return diag;
+  }
 
   transformResults.set(getForeachThreadOp().cast<OpResult>(), tileOps);
   transformResults.set(getTiledOp().cast<OpResult>(), tiledOps);
@@ -1488,16 +1567,25 @@ void transform::TileToForeachThreadOp::getEffects(
 }
 
 SmallVector<OpFoldResult> TileToForeachThreadOp::getMixedNumThreads() {
+  assert(!getPackedSizes() &&
+         "cannot extract mixed num threads from packed handles specification");
   return getMixedSizes(getStaticNumThreads(), getNumThreads());
 }
 
 SmallVector<OpFoldResult> TileToForeachThreadOp::getMixedTileSizes() {
+  assert(!getPackedSizes() &&
+         "cannot extract mixed tile sizes from packed handles specification");
   return getMixedSizes(getStaticTileSizes(), getTileSizes());
 }
 
 LogicalResult TileToForeachThreadOp::verify() {
-  if (getMixedNumThreads().empty() == getMixedTileSizes().empty())
+  if (getPackedSizes()) {
+    if (!(getNumThreads().size() == 1 ^ getTileSizes().size() == 1))
+      return emitOpError("exactly 1 num_threads or tile_sizes packed handle "
+                         "must be specified");
+  } else if (getMixedNumThreads().empty() == getMixedTileSizes().empty()) {
     return emitOpError("either num_threads or tile_sizes must be specified");
+  }
   return success();
 }
 
