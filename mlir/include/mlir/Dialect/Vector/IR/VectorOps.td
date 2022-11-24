@@ -1174,13 +1174,14 @@ def Vector_TransferReadOp :
                    OptionalAttr<BoolArrayAttr>:$in_bounds)>,
     Results<(outs AnyVectorOfAnyRank:$vector)> {
 
-  let summary = "Reads a supervector from memory into an SSA vector value.";
+  let summary = "Reads an n-D from a tensor or memref into an SSA vector value.";
 
   let description = [{
-    The `vector.transfer_read` op performs a read from a slice within a
+    The `vector.transfer_read` op performs a read from a slice of a
     [MemRef](../LangRef.md#memref-type) or a Ranked
     [Tensor](../LangRef.md#tensor-type) supplied as its first operand
-    into a [vector](../LangRef.md#vector-type) of the same base elemental type.
+    into an n-D [vector](../LangRef.md#vector-type) of the same base elemental
+    type.
 
     A memref/tensor operand with vector element type, must have its vector
     element type match a suffix (shape and element type) of the vector (e.g.
@@ -1190,11 +1191,11 @@ def Vector_TransferReadOp :
     supplied as the operands `[1 .. 1 + rank(memref/tensor))` that defines the
     starting point of the transfer (e.g. `%A[%i0, %i1, %i2]`).
 
-    The permutation_map [attribute](../LangRef.md#attributes) is an
+    The permutation_map [attribute](../LangRef.md#attributes) is an optional 
     [affine-map](Affine.md#affine-maps) which specifies the transposition on the
     slice to match the vector shape. The permutation map may be implicit and
     omitted from parsing and printing if it is the canonical minor identity map
-    (i.e. if it does not permute or broadcast any dimension).
+    (i.e. if it does not permute any dimension).
 
     The size of the slice is specified by the size of the vector, given as the
     return type.
@@ -1213,77 +1214,49 @@ def Vector_TransferReadOp :
     run out-of-bounds as indices increase. Broadcast dimensions must always be
     in-bounds. If specified, the `in_bounds` array length has to be equal to the
     vector rank. In absence of the attribute, accesses along all dimensions
-    (except for broadcasts) may run out-of-bounds. A `vector.transfer_read` can
-    be lowered to a simple load if all dimensions are specified to be within
-    bounds and no `mask` was specified.
+    may run out-of-bounds.
+    A `vector.transfer_read` can be lowered to a simple load if all dimensions
+    are specified to be within bounds and no `mask` was specified.
 
-    This operation is called 'read' by opposition to 'load' because the
-    super-vector granularity is generally not representable with a single
-    hardware register. A `vector.transfer_read` is thus a mid-level abstraction
-    that supports super-vectorization with non-effecting padding for full-tile
-    only operations.
+    This operation is called 'read' by opposition to 'load' because the n-D
+    vector granularity is generally not representable with a single hardware
+    register.
+
+    It is the responsibility of `vector.read`'s implementation to ensure the
+    memory loads are valid. Different lowerings may be pertinent depending on
+    the hardware support.
 
     More precisely, let's dive deeper into the permutation_map for the following
-    MLIR:
+    MLIR snippets:
 
     ```mlir
     vector.transfer_read %A[%expr1, %expr2, %expr3, %expr4]
-      { permutation_map : (d0,d1,d2,d3) -> (d2,0,d0) } :
+      { permutation_map : (d0,d1,d2,d3) -> (d2, d0) } :
       memref<?x?x?x?xf32>, vector<3x4x5xf32>
     ```
 
-    This operation always reads a slice starting at `%A[%expr1, %expr2, %expr3,
-    %expr4]`. The size of the slice is 3 along d2 and 5 along d0, so the slice
-    is: `%A[%expr1 : %expr1 + 5, %expr2, %expr3:%expr3 + 3, %expr4]`
+    This operation always reads a slice starting at 
+      `%A[%expr1, %expr2, %expr3,  %expr4]`.
+    The size of the slice is 3 along d2 and 5 along d0, so the slice is: 
+      `%A[%expr1 : %expr1 + 5, %expr2, %expr3:%expr3 + 3, %expr4]`
 
-    That slice needs to be read into a `vector<3x4x5xf32>`. Since the
-    permutation map is not full rank, there must be a broadcast along vector
-    dimension `1`.
+    That slice needs to be read into a `vector<3x5xf32>`.
 
     A notional lowering of vector.transfer_read could generate code resembling:
 
     ```mlir
     // %expr1, %expr2, %expr3, %expr4 defined before this point
-    %tmp = alloc() : vector<3x4x5xf32>
-    %view_in_tmp = "element_type_cast"(%tmp) : memref<1xvector<3x4x5xf32>>
+    %tmp = alloc() : memref<3x5xf32>
+    %view_in_tmp = "element_type_cast"(%tmp) : memref<vector<3x5xf32>>
     for %i = 0 to 3 {
-      affine.for %j = 0 to 4 {
-        affine.for %k = 0 to 5 {
-          %a = load %A[%expr1 + %k, %expr2, %expr3 + %i, %expr4] :
-            memref<?x?x?x?xf32>
-          store %tmp[%i, %j, %k] : vector<3x4x5xf32>
-    }}}
-    %c0 = arith.constant 0 : index
-    %vec = load %view_in_tmp[%c0] : vector<3x4x5xf32>
-    ```
-
-    On a GPU one could then map `i`, `j`, `k` to blocks and threads. Notice that
-    the temporary storage footprint is `3 * 5` values but `3 * 4 * 5` values are
-    actually transferred between `%A` and `%tmp`.
-
-    Alternatively, if a notional vector broadcast operation were available, the
-    lowered code would resemble:
-
-    ```mlir
-    // %expr1, %expr2, %expr3, %expr4 defined before this point
-    %tmp = alloc() : vector<3x4x5xf32>
-    %view_in_tmp = "element_type_cast"(%tmp) : memref<1xvector<3x4x5xf32>>
-    for %i = 0 to 3 {
-      affine.for %k = 0 to 5 {
-        %a = load %A[%expr1 + %k, %expr2, %expr3 + %i, %expr4] :
+      affine.for %j = 0 to 5 {
+        %a = load %A[%expr1 + %j, %expr2, %expr3 + %i, %expr4] :
           memref<?x?x?x?xf32>
-        store %tmp[%i, 0, %k] : vector<3x4x5xf32>
+        store %a, %tmp[%i, %j] : memref<3x5xf32>
     }}
     %c0 = arith.constant 0 : index
-    %tmpvec = load %view_in_tmp[%c0] : vector<3x4x5xf32>
-    %vec = broadcast %tmpvec, 1 : vector<3x4x5xf32>
+    %vec = load %view_in_tmp[] : vector<3x5xf32>
     ```
-
-    where `broadcast` broadcasts from element 0 to all others along the
-    specified dimension. This time, the temporary storage footprint is `3 * 5`
-    values which is the same amount of data as the `3 * 5` values transferred.
-    An additional `1` broadcast is required. On a GPU this broadcast could be
-    implemented using a warp-shuffle if loop `j` were mapped to `threadIdx.x`.
 
     Syntax
     ```
@@ -1305,17 +1278,6 @@ def Vector_TransferReadOp :
                memref<?x?x?xf32>, vector<32x256xf32>
     }}}
 
-    // Read the slice `%A[%i0, %i1]` (i.e. the element `%A[%i0, %i1]`) into
-    // vector<128xf32>. The underlying implementation will require a 1-D vector
-    // broadcast:
-    for %i0 = 0 to %0 {
-      affine.for %i1 = 0 to %1 {
-        %3 = vector.transfer_read %A[%i0, %i1]
-             {permutation_map: (d0, d1) -> (0)} :
-             memref<?x?xf32>, vector<128xf32>
-      }
-    }
-
     // Read from a memref with vector element type.
     %4 = vector.transfer_read %arg1[%c3, %c3], %vf0
       {permutation_map = (d0, d1)->(d0, d1)}
@@ -1325,11 +1287,6 @@ def Vector_TransferReadOp :
     %4 = vector.transfer_read %arg1[%c3, %c3], %vf0
       {permutation_map = (d0, d1)->(d0, d1)}
         : tensor<?x?xvector<4x3xf32>>, vector<1x1x4x3xf32>
-
-    // Special encoding for 0-d transfer with 0-d tensor/memref, vector shape
-    // {1} and permutation_map () -> (0).
-    %0 = vector.transfer_read %arg0[], %f0 {permutation_map = affine_map<()->(0)>} :
-      tensor<f32>, vector<1xf32>
     ```
   }];
 
@@ -1388,10 +1345,10 @@ def Vector_TransferWriteOp :
                    OptionalAttr<BoolArrayAttr>:$in_bounds)>,
     Results<(outs Optional<AnyRankedTensor>:$result)> {
 
-  let summary = "The vector.transfer_write op writes a supervector to memory.";
+  let summary = "The vector.transfer_write op writes an n-D vector to a tensor or memref.";
 
   let description = [{
-    The `vector.transfer_write` op performs a write from a
+    The `vector.transfer_write` op performs a write from an n-D
     [vector](../LangRef.md#vector-type), supplied as its first operand, into a
     slice within a [MemRef](../LangRef.md#memref-type) or a Ranked
     [Tensor](../LangRef.md#tensor-type) of the same base elemental type,
@@ -1399,8 +1356,11 @@ def Vector_TransferWriteOp :
 
     A vector memref/tensor operand must have its vector element type match a
     suffix (shape and element type) of the vector (e.g. memref<3x2x6x4x3xf32>,
-    vector<1x1x4x3xf32>). If the operand is a tensor, the operation returns a
-    new tensor of the same type.
+    vector<1x1x4x3xf32>).
+    
+    If the operand is a tensor, the operation returns a new tensor of the same
+    type with the corresponding elements updated to the values contained in the
+    vector.
 
     The slice is further defined by a full-rank index within the MemRef/Tensor,
     supplied as the operands `[2 .. 2 + rank(memref/tensor))` that defines the
@@ -1410,8 +1370,7 @@ def Vector_TransferWriteOp :
     [affine-map](Affine.md#affine-maps) which specifies the transposition on the
     slice to match the vector shape. The permutation map may be implicit and
     omitted from parsing and printing if it is the canonical minor identity map
-    (i.e. if it does not permute any dimension). In contrast to `transfer_read`,
-    write ops cannot have broadcast dimensions.
+    (i.e. if it does not permute any dimension).
 
     The size of the slice is specified by the size of the vector.
 
@@ -1424,18 +1383,20 @@ def Vector_TransferWriteOp :
     While the starting point of the transfer has to be in-bounds, accesses may
     run out-of-bounds as indices increase. If specified, the `in_bounds` array
     length has to be equal to the vector rank. In absence of the attribute,
-    accesses along all dimensions may run out-of-bounds. A
-    `vector.transfer_write` can be lowered to a simple store if all dimensions
+    accesses along all dimensions may run out-of-bounds.
+    A `vector.transfer_write` can be lowered to a simple store if all dimensions
     are specified to be within bounds and no `mask` was specified.
 
-    This operation is called 'write' by opposition to 'store' because the
-    super-vector granularity is generally not representable with a single
-    hardware register. A `vector.transfer_write` is thus a
-    mid-level abstraction that supports super-vectorization with non-effecting
-    padding for full-tile-only code. It is the responsibility of
-    `vector.transfer_write`'s implementation to ensure the memory writes are
-    valid. Different lowerings may be pertinent depending on the hardware
-    support.
+    This operation is called 'write' by opposition to 'store' because the n-D
+    vector granularity is generally not representable with a single hardware
+    register.
+    
+    It is the responsibility of `vector.transfer_write`'s implementation to
+    ensure the memory stores are valid. Different lowerings may be pertinent
+    depending on the hardware support.
+
+    More precisely, let's dive deeper into the permutation_map for the following
+    MLIR snippets:
 
     Example:
 
@@ -1461,11 +1422,6 @@ def Vector_TransferWriteOp :
     %5 = vector.transfer_write %4, %arg1[%c3, %c3]
       {permutation_map = (d0, d1)->(d0, d1)}
         : vector<1x1x4x3xf32>, tensor<?x?xvector<4x3xf32>>
-
-    // Special encoding for 0-d transfer with 0-d tensor/memref, vector shape
-    // {1} and permutation_map () -> (0).
-    %1 = vector.transfer_write %0, %arg0[] {permutation_map = affine_map<()->(0)>} :
-      vector<1xf32>, tensor<f32>
     ```
   }];
 

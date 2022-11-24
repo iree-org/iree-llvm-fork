@@ -76,10 +76,9 @@ def VectorTransferOpInterface : OpInterface<"VectorTransferOpInterface"> {
       /*args=*/(ins "unsigned":$dim),
       /*methodBody=*/"",
       /*defaultImplementation=*/[{
-        return $_op.isBroadcastDim(dim)
-            || ($_op.getInBounds()
-                && $_op.getInBounds()->template cast<::mlir::ArrayAttr>()[dim]
-                                    .template cast<::mlir::BoolAttr>().getValue());
+        return $_op.getInBounds() &&
+               $_op.getInBounds()->template cast<::mlir::ArrayAttr>()[dim]
+                                  .template cast<::mlir::BoolAttr>().getValue();
       }]
     >,
     InterfaceMethod<
@@ -113,33 +112,6 @@ def VectorTransferOpInterface : OpInterface<"VectorTransferOpInterface"> {
       /*args=*/(ins),
       /*methodBody=*/"return $_op.getPermutationMap();"
       /*defaultImplementation=*/
-    >,
-    InterfaceMethod<
-      /*desc=*/[{ Returns true if the specified dimension is a broadcast. }],
-      /*retTy=*/"bool",
-      /*methodName=*/"isBroadcastDim",
-      /*args=*/(ins "unsigned":$idx),
-      /*methodBody=*/"",
-      /*defaultImplementation=*/[{
-        auto expr = $_op.getPermutationMap().getResult(idx);
-        return expr.template isa<::mlir::AffineConstantExpr>() &&
-               expr.template dyn_cast<::mlir::AffineConstantExpr>().getValue() == 0;
-      }]
-    >,
-    InterfaceMethod<
-      /*desc=*/[{ Returns true if at least one of the dimensions in the
-                  permutation map is a broadcast.}],
-      /*retTy=*/"bool",
-      /*methodName=*/"hasBroadcastDim",
-      /*args=*/(ins),
-      /*methodBody=*/"",
-      /*defaultImplementation=*/[{
-        for (unsigned i = 0, rank = getTransferRank(); i < rank; ++i) {
-          if ($_op.isBroadcastDim(i))
-            return true;
-        }
-        return false;
-      }]
     >,
     InterfaceMethod<
       /*desc=*/"Return the `in_bounds` boolean ArrayAttr.",
@@ -265,9 +237,6 @@ def VectorTransferOpInterface : OpInterface<"VectorTransferOpInterface"> {
                                       $_op.getVectorType().getShape())) {
           AffineExpr dim = std::get<0>(vecDims);
           int64_t size = std::get<1>(vecDims);
-          // Skip broadcast.
-          if (dim.isa<AffineConstantExpr>())
-            continue;
           dimSizes[dim.cast<AffineDimExpr>().getPosition()] = size;
         }
         return dimSizes;

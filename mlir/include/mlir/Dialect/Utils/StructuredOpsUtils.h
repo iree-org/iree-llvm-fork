@@ -27,7 +27,7 @@
 
 namespace mlir {
 
-class OpBuilder;
+class RewriterBase;
 
 /// Tests whether the given maps describe a row major matmul. The test is
 /// permutation-invariant. Note that this only checks the affine maps from an
@@ -79,7 +79,7 @@ public:
     Red() : IteratorType(IteratorTypeT::reduction) {}
   };
 
-  StructuredGenerator(OpBuilder &builder, StructuredOpInterface op)
+  StructuredGenerator(RewriterBase &builder, StructuredOpInterface op)
       : builder(builder), ctx(op.getContext()), loc(op.getLoc()),
         iterators(op.getIteratorTypesArray()), maps(op.getIndexingMapsArray()),
         op(op) {}
@@ -100,7 +100,7 @@ public:
   }
 
 protected:
-  OpBuilder &builder;
+  RewriterBase &builder;
   MLIRContext *ctx;
   Location loc;
   SmallVector<IteratorTypeT> iterators;

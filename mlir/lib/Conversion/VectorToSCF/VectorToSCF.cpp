@@ -20,6 +20,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -52,18 +53,12 @@ struct VectorToSCFPattern : public OpRewritePattern<OpTy> {
 
 /// Given a vector transfer op, calculate which dimension of the `source`
 /// memref should be unpacked in the next application of TransferOpConversion.
-/// A return value of None indicates a broadcast.
 template <typename OpTy>
-static Optional<int64_t> unpackedDim(OpTy xferOp) {
+static int64_t unpackedDim(OpTy xferOp) {
   // TODO: support 0-d corner case.
   assert(xferOp.getTransferRank() > 0 && "unexpected 0-d transfer");
   auto map = xferOp.getPermutationMap();
-  if (auto expr = map.getResult(0).template dyn_cast<AffineDimExpr>()) {
-    return expr.getPosition();
-  }
-  assert(xferOp.isBroadcastDim(0) &&
-         "Expected AffineDimExpr or AffineConstantExpr");
-  return None;
+  return map.getResult(0).template cast<AffineDimExpr>().getPosition();
 }
 
 /// Compute the permutation map for the new (N-1)-D vector transfer op. This
@@ -89,19 +84,15 @@ static void getXferIndices(OpBuilder &b, OpTy xferOp, Value iv,
                            SmallVector<Value, 8> &indices) {
   typename OpTy::Adaptor adaptor(xferOp);
   // Corresponding memref dim of the vector dim that is unpacked.
-  auto dim = unpackedDim(xferOp);
+  int64_t dim = unpackedDim(xferOp);
   auto prevIndices = adaptor.getIndices();
   indices.append(prevIndices.begin(), prevIndices.end());
 
   Location loc = xferOp.getLoc();
-  bool isBroadcast = !dim.has_value();
-  if (!isBroadcast) {
-    AffineExpr d0, d1;
-    bindDims(xferOp.getContext(), d0, d1);
-    Value offset = adaptor.getIndices()[dim.value()];
-    indices[dim.value()] =
-        makeComposedAffineApply(b, loc, d0 + d1, {offset, iv});
-  }
+  AffineExpr d0, d1;
+  bindDims(xferOp.getContext(), d0, d1);
+  Value offset = adaptor.getIndices()[dim];
+  indices[dim] = makeComposedAffineApply(b, loc, d0 + d1, {offset, iv});
 }
 
 static void maybeYieldValue(OpBuilder &b, Location loc, bool hasRetVal,
@@ -119,16 +110,12 @@ static void maybeYieldValue(OpBuilder &b, Location loc, bool hasRetVal,
 /// * xferOp does not have a mask.
 /// * xferOp's mask is not 1D. (In case of (N>1)-D, a subvector of the mask is
 ///   computed and attached to the new transfer op in the pattern.)
-/// * The to-be-unpacked dim of xferOp is a broadcast.
 template <typename OpTy>
 static Value generateMaskCheck(OpBuilder &b, OpTy xferOp, Value iv) {
   if (!xferOp.getMask())
     return Value();
   if (xferOp.getMaskType().getRank() != 1)
     return Value();
-  if (xferOp.isBroadcastDim(0))
-    return Value();
-
   Location loc = xferOp.getLoc();
   return b.create<vector::ExtractElementOp>(loc, xferOp.getMask(), iv);
 }
@@ -159,23 +146,21 @@ static Value generateMaskCheck(OpBuilder &b, OpTy xferOp, Value iv) {
 /// `resultTypes`.
 template <typename OpTy>
 static Value generateInBoundsCheck(
-    OpBuilder &b, OpTy xferOp, Value iv, Optional<int64_t> dim,
-    TypeRange resultTypes,
+    OpBuilder &b, OpTy xferOp, Value iv, int64_t dim, TypeRange resultTypes,
     function_ref<Value(OpBuilder &, Location)> inBoundsCase,
     function_ref<Value(OpBuilder &, Location)> outOfBoundsCase = nullptr) {
   bool hasRetVal = !resultTypes.empty();
   Value cond; // Condition to be built...
 
   // Condition check 1: Access in-bounds?
-  bool isBroadcast = !dim; // No in-bounds check for broadcasts.
   Location loc = xferOp.getLoc();
   ImplicitLocOpBuilder lb(xferOp.getLoc(), b);
-  if (!xferOp.isDimInBounds(0) && !isBroadcast) {
+  if (!xferOp.isDimInBounds(0)) {
     Value memrefDim =
-        vector::createOrFoldDimOp(b, loc, xferOp.getSource(), *dim);
+        vector::createOrFoldDimOp(b, loc, xferOp.getSource(), dim);
     AffineExpr d0, d1;
     bindDims(xferOp.getContext(), d0, d1);
-    Value base = xferOp.getIndices()[*dim];
+    Value base = xferOp.getIndices()[dim];
     Value memrefIdx = makeComposedAffineApply(b, loc, d0 + d1, {base, iv});
     cond = lb.create<arith::CmpIOp>(arith::CmpIPredicate::sgt, memrefDim,
                                     memrefIdx);
@@ -217,7 +202,7 @@ static Value generateInBoundsCheck(
 /// a return value. Consequently, this function does not have a return value.
 template <typename OpTy>
 static void generateInBoundsCheck(
-    OpBuilder &b, OpTy xferOp, Value iv, Optional<int64_t> dim,
+    OpBuilder &b, OpTy xferOp, Value iv, int64_t dim,
     function_ref<void(OpBuilder &, Location)> inBoundsCase,
     function_ref<void(OpBuilder &, Location)> outOfBoundsCase = nullptr) {
   generateInBoundsCheck(
@@ -695,7 +680,7 @@ struct TransferOpConversion : public VectorToSCFPattern<OpTy> {
     ImplicitLocOpBuilder locB(xferOp.getLoc(), rewriter);
     auto dataBuffer = Strategy<OpTy>::getBuffer(xferOp);
     auto dataBufferType = dataBuffer.getType().template dyn_cast<MemRefType>();
-    auto castedDataType = unpackOneDim(dataBufferType);
+    MemRefType castedDataType = unpackOneDim(dataBufferType);
     auto castedDataBuffer =
         locB.create<vector::TypeCastOp>(castedDataType, dataBuffer);
 
@@ -705,15 +690,12 @@ struct TransferOpConversion : public VectorToSCFPattern<OpTy> {
       auto maskBuffer = getMaskBuffer(xferOp);
       auto maskBufferType =
           maskBuffer.getType().template dyn_cast<MemRefType>();
-      if (xferOp.isBroadcastDim(0) || xferOp.getMaskType().getRank() == 1) {
+      if (xferOp.getMaskType().getRank() == 1) {
         // Do not unpack a dimension of the mask, if:
-        // * To-be-unpacked transfer op dimension is a broadcast.
         // * Mask is 1D, i.e., the mask cannot be further unpacked.
-        //   (That means that all remaining dimensions of the transfer op must
-        //   be broadcasted.)
         castedMaskBuffer = maskBuffer;
       } else {
-        auto castedMaskType = unpackOneDim(maskBufferType);
+        MemRefType castedMaskType = unpackOneDim(maskBufferType);
         castedMaskBuffer =
             locB.create<vector::TypeCastOp>(castedMaskType, maskBuffer);
       }
@@ -743,22 +725,16 @@ struct TransferOpConversion : public VectorToSCFPattern<OpTy> {
                 OpTy newXfer = Strategy<OpTy>::rewriteOp(
                     b, this->options, xferOp, castedDataBuffer, iv, loopState);
 
-                // If old transfer op has a mask: Set mask on new transfer op.
-                // Special case: If the mask of the old transfer op is 1D and
-                // the
-                //               unpacked dim is not a broadcast, no mask is
-                //               needed on the new transfer op.
-                if (xferOp.getMask() && (xferOp.isBroadcastDim(0) ||
-                                         xferOp.getMaskType().getRank() > 1)) {
+                // If old transfer op has a mask, set mask on new transfer op.
+                // Special case: If the mask of the old transfer op is 1D, no
+                // mask is needed on the new transfer op.
+                if (xferOp.getMask() && xferOp.getMaskType().getRank() > 1) {
                   OpBuilder::InsertionGuard guard(b);
                   b.setInsertionPoint(newXfer); // Insert load before newXfer.
 
                   SmallVector<Value, 8> loadIndices;
                   Strategy<OpTy>::getBufferIndices(xferOp, loadIndices);
-                  // In case of broadcast: Use same indices to load from memref
-                  // as before.
-                  if (!xferOp.isBroadcastDim(0))
-                    loadIndices.push_back(iv);
+                  loadIndices.push_back(iv);
 
                   auto mask = b.create<memref::LoadOp>(loc, castedMaskBuffer,
                                                        loadIndices);
@@ -795,13 +771,6 @@ static void maybeAssignMask(OpBuilder &b, OpTy xferOp, OpTy newXferOp,
   if (!xferOp.getMask())
     return;
 
-  if (xferOp.isBroadcastDim(0)) {
-    // To-be-unpacked dimension is a broadcast, which does not have a
-    // corresponding mask dimension. Mask attribute remains unchanged.
-    newXferOp.getMaskMutable().assign(xferOp.getMask());
-    return;
-  }
-
   if (xferOp.getMaskType().getRank() > 1) {
     // Unpack one dimension of the mask.
     OpBuilder::InsertionGuard guard(b);
@@ -813,8 +782,8 @@ static void maybeAssignMask(OpBuilder &b, OpTy xferOp, OpTy newXferOp,
     newXferOp.getMaskMutable().assign(newMask);
   }
 
-  // If we end up here: The mask of the old transfer op is 1D and the unpacked
-  // dim is not a broadcast, so no mask is needed on the new transfer op.
+  // If we end up here, then the mask of the old transfer op is 1D, so no mask
+  // is needed on the new transfer op.
   // `generateInBoundsCheck` will have evaluated the mask already.
 }
 
@@ -889,8 +858,8 @@ struct UnrollTransferReadConversion
     }
   }
 
-  /// Rewrite the op: Unpack one dimension. Can handle masks, out-of-bounds
-  /// accesses, and broadcasts and transposes in permutation maps.
+  /// Rewrite the op by unpacking one dimension.
+  /// This handles masks, out-of-bounds accesses and permutation map transposes.
   LogicalResult matchAndRewrite(TransferReadOp xferOp,
                                 PatternRewriter &rewriter) const override {
     if (xferOp.getVectorType().getRank() <= options.targetRank)
@@ -1016,8 +985,8 @@ struct UnrollTransferWriteConversion
     }
   }
 
-  /// Rewrite the op: Unpack one dimension. Can handle masks, out-of-bounds
-  /// accesses, and broadcasts and transposes in permutation maps.
+  /// Rewrite the op by unpacking one dimension.
+  /// This handles masks, out-of-bounds accesses and permutation map transposes.
   LogicalResult matchAndRewrite(TransferWriteOp xferOp,
                                 PatternRewriter &rewriter) const override {
     if (xferOp.getVectorType().getRank() <= options.targetRank)
@@ -1089,12 +1058,11 @@ struct UnrollTransferWriteConversion
 namespace lowering_1_d {
 
 /// Compute the indices into the memref for the LoadOp/StoreOp generated as
-/// part of TransferOp1dConversion. Return the memref dimension on which
-/// the transfer is operating. A return value of None indicates a broadcast.
+/// part of TransferOp1dConversion.
+/// Return the memref dimension on which the transfer is operating.
 template <typename OpTy>
-static Optional<int64_t>
-get1dMemrefIndices(OpBuilder &b, OpTy xferOp, Value iv,
-                   SmallVector<Value, 8> &memrefIndices) {
+static int64_t get1dMemrefIndices(OpBuilder &b, OpTy xferOp, Value iv,
+                                  SmallVector<Value, 8> &memrefIndices) {
   auto indices = xferOp.getIndices();
   auto map = xferOp.getPermutationMap();
   assert(xferOp.getTransferRank() > 0 && "unexpected 0-d transfer");
@@ -1102,19 +1070,14 @@ get1dMemrefIndices(OpBuilder &b, OpTy xferOp, Value iv,
   memrefIndices.append(indices.begin(), indices.end());
   assert(map.getNumResults() == 1 &&
          "Expected 1 permutation map result for 1D transfer");
-  if (auto expr = map.getResult(0).template dyn_cast<AffineDimExpr>()) {
-    Location loc = xferOp.getLoc();
-    auto dim = expr.getPosition();
-    AffineExpr d0, d1;
-    bindDims(xferOp.getContext(), d0, d1);
-    Value offset = memrefIndices[dim];
-    memrefIndices[dim] = makeComposedAffineApply(b, loc, d0 + d1, {offset, iv});
-    return dim;
-  }
-
-  assert(xferOp.isBroadcastDim(0) &&
-         "Expected AffineDimExpr or AffineConstantExpr");
-  return None;
+  auto expr = map.getResult(0).template cast<AffineDimExpr>();
+  Location loc = xferOp.getLoc();
+  auto dim = expr.getPosition();
+  AffineExpr d0, d1;
+  bindDims(xferOp.getContext(), d0, d1);
+  Value offset = memrefIndices[dim];
+  memrefIndices[dim] = makeComposedAffineApply(b, loc, d0 + d1, {offset, iv});
+  return dim;
 }
 
 /// Codegen strategy for TransferOp1dConversion, depending on the
@@ -1188,12 +1151,11 @@ static bool isLastMemrefDimUnitStride(MemRefType type) {
   return succeeded(successStrides) && (strides.empty() || strides.back() == 1);
 }
 
-/// Lower a 1D vector transfer op to SCF using scalar loads/stores. This is
-/// necessary in cases where a 1D vector transfer op cannot be lowered into
-/// vector load/stores due to non-unit strides or broadcasts:
+/// Lower a 1D vector transfer op to SCF using scalar loads/stores.
+/// This is necessary in cases where a 1D vector transfer op cannot be lowered
+/// into vector load/stores due to non-unit strides.
 ///
 /// * Transfer dimension is not the last memref dimension
-/// * Transfer dimension is a broadcast (i.e., scalar load + broadcast)
 /// * Memref has a layout map with non-unit stride on the last dimension
 ///
 /// This pattern generates IR as follows:

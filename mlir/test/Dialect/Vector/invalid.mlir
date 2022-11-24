@@ -354,7 +354,7 @@ func.func @test_vector.transfer_read(%arg0: memref<?x?xf32>) {
 func.func @test_vector.transfer_read(%arg0: memref<?x?xf32>) {
   %c3 = arith.constant 3 : index
   %cst = arith.constant 3.0 : f32
-  // expected-error@+1 {{requires a projected permutation_map (at most one dim or the zero constant can appear in each result)}}
+  // expected-error@+1 {{requires a projected permutation_map (exactly one dim can appear in each result)}}
   %0 = vector.transfer_read %arg0[%c3, %c3], %cst {permutation_map = affine_map<(d0, d1)->(d0 + d1)>} : memref<?x?xf32>, vector<128xf32>
 }
 
@@ -363,7 +363,7 @@ func.func @test_vector.transfer_read(%arg0: memref<?x?xf32>) {
 func.func @test_vector.transfer_read(%arg0: memref<?x?xf32>) {
   %c3 = arith.constant 3 : index
   %cst = arith.constant 3.0 : f32
-  // expected-error@+1 {{requires a projected permutation_map (at most one dim or the zero constant can appear in each result)}}
+  // expected-error@+1 {{requires a projected permutation_map (exactly one dim can appear in each result)}}
   %0 = vector.transfer_read %arg0[%c3, %c3], %cst {permutation_map = affine_map<(d0, d1)->(d0 + 1)>} : memref<?x?xf32>, vector<128xf32>
 }
 
@@ -416,16 +416,6 @@ func.func @test_vector.transfer_read(%arg0: memref<?x?xvector<2x3xf32>>) {
   %vf0 = vector.splat %f0 : vector<2x3xf32>
   // expected-error@+1 {{ expects the optional in_bounds attr of same rank as permutation_map results: affine_map<(d0, d1) -> (d0, d1)>}}
   %0 = vector.transfer_read %arg0[%c3, %c3], %vf0 {in_bounds = [true], permutation_map = affine_map<(d0, d1)->(d0, d1)>} : memref<?x?xvector<2x3xf32>>, vector<1x1x2x3xf32>
-}
-
-// -----
-
-func.func @test_vector.transfer_read(%arg0: memref<?x?xvector<2x3xf32>>) {
-  %c3 = arith.constant 3 : index
-  %f0 = arith.constant 0.0 : f32
-  %vf0 = vector.splat %f0 : vector<2x3xf32>
-  // expected-error@+1 {{requires broadcast dimensions to be in-bounds}}
-  %0 = vector.transfer_read %arg0[%c3, %c3], %vf0 {in_bounds = [false, true], permutation_map = affine_map<(d0, d1)->(0, d1)>} : memref<?x?xvector<2x3xf32>>, vector<1x1x2x3xf32>
 }
 
 // -----
@@ -509,7 +499,7 @@ func.func @test_vector.transfer_write(%arg0: memref<?x?xf32>) {
 func.func @test_vector.transfer_write(%arg0: memref<?x?xf32>) {
   %c3 = arith.constant 3 : index
   %cst = arith.constant dense<3.0> : vector<128 x f32>
-  // expected-error@+1 {{requires a projected permutation_map (at most one dim or the zero constant can appear in each result)}}
+  // expected-error@+1 {{requires a projected permutation_map (exactly one dim can appear in each result)}}
   vector.transfer_write %cst, %arg0[%c3, %c3] {permutation_map = affine_map<(d0, d1)->(d0 + d1)>} : vector<128xf32>, memref<?x?xf32>
 }
 
@@ -518,7 +508,7 @@ func.func @test_vector.transfer_write(%arg0: memref<?x?xf32>) {
 func.func @test_vector.transfer_write(%arg0: memref<?x?xf32>) {
   %c3 = arith.constant 3 : index
   %cst = arith.constant dense<3.0> : vector<128 x f32>
-  // expected-error@+1 {{requires a projected permutation_map (at most one dim or the zero constant can appear in each result)}}
+  // expected-error@+1 {{requires a projected permutation_map (exactly one dim can appear in each result)}}
   vector.transfer_write %cst, %arg0[%c3, %c3] {permutation_map = affine_map<(d0, d1)->(d0 + 1)>} : vector<128xf32>, memref<?x?xf32>
 }
 
@@ -536,7 +526,7 @@ func.func @test_vector.transfer_write(%arg0: memref<?x?x?xf32>) {
 func.func @test_vector.transfer_write(%arg0: memref<?xf32>, %arg1: vector<7xf32>) {
   %c3 = arith.constant 3 : index
   %cst = arith.constant 3.0 : f32
-  // expected-error@+1 {{should not have broadcast dimensions}}
+  // expected-error@+1 {{requires a projected permutation_map (exactly one dim can appear in each result)}}
   vector.transfer_write %arg1, %arg0[%c3]
       {permutation_map = affine_map<(d0) -> (0)>}
       : vector<7xf32>, memref<?xf32>

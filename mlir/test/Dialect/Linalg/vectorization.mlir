@@ -91,8 +91,11 @@ transform.sequence failures(propagate) {
 // CHECK-LABEL: func @vectorization_test
 func.func @vectorization_test(%A: memref<8x16xf32>, %B: memref<16x32xf32>,
                          %C: memref<8x32xf32>) {
-  //       CHECK: vector.transfer_read %{{.*}} : memref<8x16xf32>, vector<8x32x16xf32>
-  //       CHECK: vector.transfer_read %{{.*}} : memref<16x32xf32>, vector<8x32x16xf32>
+  //       CHECK: vector.transfer_read %{{.*}} : memref<8x16xf32>, vector<8x16xf32>
+  //       CHECK: vector.broadcast {{.*}} : vector<8x16xf32> to vector<32x8x16xf32>
+  //       CHECK: vector.transpose {{.*}}, [1, 0, 2] : vector<32x8x16xf32> to vector<8x32x16xf32>
+  //       CHECK: vector.transfer_read %{{.*}} : memref<16x32xf32>, vector<32x16xf32>
+  //       CHECK: vector.broadcast {{.*}} : vector<32x16xf32> to vector<8x32x16xf32>
   //       CHECK: %[[ACC:.*]] = vector.transfer_read %{{.*}} : memref<8x32xf32>, vector<8x32xf32>
   //       CHECK: %[[MUL:.*]] = arith.mulf %{{.*}}, %{{.*}} : vector<8x32x16xf32>
   //       CHECK: %[[R:.*]] = vector.multi_reduction <add>, %[[MUL]], %[[ACC]] [2] : vector<8x32x16xf32> to vector<8x32xf32>
@@ -131,8 +134,11 @@ transform.sequence failures(propagate) {
 // CHECK-LABEL: func @generic_output_transpose
 func.func @generic_output_transpose(%A: memref<8x16xf32>, %B: memref<16x32xf32>,
                          %C: memref<32x8xf32>) {
-  //       CHECK: vector.transfer_read %{{.*}} : memref<8x16xf32>, vector<8x32x16xf32>
-  //       CHECK: vector.transfer_read %{{.*}} : memref<16x32xf32>, vector<8x32x16xf32>
+  //       CHECK: vector.transfer_read %{{.*}} : memref<8x16xf32>, vector<8x16xf32>
+  //       CHECK: vector.broadcast {{.*}} : vector<8x16xf32> to vector<32x8x16xf32>
+  //       CHECK: vector.transpose {{.*}}, [1, 0, 2] : vector<32x8x16xf32> to vector<8x32x16xf32>
+  //       CHECK: vector.transfer_read %{{.*}} : memref<16x32xf32>, vector<32x16xf32>
+  //       CHECK: vector.broadcast {{.*}} : vector<32x16xf32> to vector<8x32x16xf32>
   //       CHECK: %[[ACC:.*]] = vector.transfer_read %{{.*}} : memref<32x8xf32>, vector<8x32xf32>
   //       CHECK: %[[MUL:.*]] = arith.mulf %{{.*}}, %{{.*}} : vector<8x32x16xf32>
   //       CHECK: %[[R:.*]] = vector.multi_reduction <add>, %[[MUL]], %[[ACC]] [2] : vector<8x32x16xf32> to vector<8x32xf32>
@@ -198,8 +204,11 @@ transform.sequence failures(propagate) {
 // CHECK-LABEL: func @vectorization_test_integer
 func.func @vectorization_test_integer(%A: memref<8x16xi32>, %B: memref<16x32xi32>,
                                  %C: memref<8x32xi32>) {
-  //       CHECK: vector.transfer_read %{{.*}} : memref<8x16xi32>, vector<8x32x16xi32>
-  //       CHECK: vector.transfer_read %{{.*}} : memref<16x32xi32>, vector<8x32x16xi32>
+  //       CHECK: vector.transfer_read %{{.*}} : memref<8x16xi32>, vector<8x16xi32>
+  //       CHECK: vector.broadcast {{.*}} : vector<8x16xi32> to vector<32x8x16xi32>
+  //       CHECK: vector.transpose {{.*}}, [1, 0, 2] : vector<32x8x16xi32> to vector<8x32x16xi32>
+  //       CHECK: vector.transfer_read %{{.*}} : memref<16x32xi32>, vector<32x16xi32>
+  //       CHECK: vector.broadcast {{.*}} : vector<32x16xi32> to vector<8x32x16xi32>
   //       CHECK: %[[ACC:.*]] = vector.transfer_read %{{.*}} : memref<8x32xi32>, vector<8x32xi32>
   //       CHECK: %[[MUL:.*]] = arith.muli %{{.*}}, %{{.*}} : vector<8x32x16xi32>
   //       CHECK: vector.multi_reduction <add>, %[[MUL]], %[[ACC]] [2] : vector<8x32x16xi32> to vector<8x32xi32>
@@ -455,7 +464,8 @@ func.func @generic_vectorize(%arg0: memref<4x256xf32>,
     memref<4x256xf32>, memref<4x256xf32>) {
   ^bb0(%arg3 : f32, %arg4 : f32, %arg5: f32, %arg6: f32, %arg7: f32, %arg8: f32,
   //       CHECK:   %[[V2:.*]] = vector.transfer_read %[[ARG1]][%[[C0]], %[[C0]]], {{.*}} : memref<4x256xf32>, vector<4x256xf32>
-  //       CHECK:   %[[V0:.*]] = vector.transfer_read %[[ARG2]][%[[C0]]], {{.*}} : memref<256xf32>, vector<4x256xf32>
+  //       CHECK:   %[[V0tmp:.*]] = vector.transfer_read %[[ARG2]][%[[C0]]], {{.*}} : memref<256xf32>, vector<256xf32>
+  //       CHECK:   %[[V0:.*]] = vector.broadcast %[[V0tmp]] : vector<256xf32> to vector<4x256xf32>
   //       CHECK:   %[[V3:.*]] = vector.transfer_read %[[ARG0]][%[[C0]], %[[C0]]], {{.*}} : memref<4x256xf32>, vector<4x256xf32>
   //       CHECK:   %[[V1:.*]] = vector.transfer_read %[[ARG0]][%[[C0]], %[[C0]]], {{.*}} : memref<4x256xf32>, vector<4x256xf32>
     %arg9 : f32, %arg10 : f32, %arg11 : f32, %arg12 : f32, %arg13 : f32,
@@ -542,7 +552,8 @@ func.func @generic_vectorize_tensor(%arg0: tensor<4x256xf32>,
   //   CHECK-DAG:   %[[CST1:.*]] = arith.constant dense<1.000000e+00> : vector<4x256xf32>
   //   CHECK-DAG:   %[[C0:.*]] = arith.constant 0 : index
   //       CHECK:   %[[V2:.*]] = vector.transfer_read %[[ARG1]][%[[C0]], %[[C0]]], {{.*}} : tensor<4x256xf32>, vector<4x256xf32>
-  //       CHECK:   %[[V0:.*]] = vector.transfer_read %[[ARG2]][%[[C0]]], {{.*}} : tensor<256xf32>, vector<4x256xf32>
+  //       CHECK:   %[[V0tmp:.*]] = vector.transfer_read %[[ARG2]][%[[C0]]], {{.*}} : tensor<256xf32>, vector<256xf32>
+  //       CHECK:   %[[V0:.*]] = vector.broadcast %[[V0tmp]] : vector<256xf32> to vector<4x256xf32>
   //       CHECK:   %[[V3:.*]] = vector.transfer_read %[[ARG0]][%[[C0]], %[[C0]]], {{.*}} : tensor<4x256xf32>, vector<4x256xf32>
   //       CHECK:   %[[V1:.*]] = vector.transfer_read %[[ARG0]][%[[C0]], %[[C0]]], {{.*}} : tensor<4x256xf32>, vector<4x256xf32>
   //       CHECK:   %[[ADD:.*]] = arith.addf %[[V0]], %[[V1]] : vector<4x256xf32>
@@ -596,17 +607,19 @@ transform.sequence failures(propagate) {
 
 // -----
 
-// CHECK-DAG: #[[$MAP0:.*]] = affine_map<(d0, d1) -> (d0, 0, 0, d1)>
-// CHECK-DAG: #[[$MAP1:.*]] = affine_map<(d0) -> (d0, 0, 0, 0)>
-// CHECK-DAG: #[[$MAP2:.*]] = affine_map<(d0) -> (0, 0, d0, 0)>
-// CHECK-DAG: #[[$MAP3:.*]] = affine_map<(d0, d1) -> (d1, 0, d0, 0)>
+// CHECK-DAG: #[[$MAP:.*]] = affine_map<(d0, d1) -> (d1, d0)>
+
 //     CHECK: func @generic_vectorize_broadcast_transpose
 // CHECK-DAG:   %[[C0:.*]] = arith.constant 0 : index
 // CHECK-DAG:   %[[CF:.*]] = arith.constant 0.000000e+00 : f32
-//     CHECK:   %[[V0:.*]] = vector.transfer_read %{{.*}}[%[[C0]], %[[C0]]], %[[CF]] {in_bounds = [true, true, true, true], permutation_map = #[[$MAP0]]} : memref<4x4xf32>, vector<4x4x4x4xf32>
-//     CHECK:   %[[V1:.*]] = vector.transfer_read %{{.*}}[%[[C0]]], %[[CF]] {in_bounds = [true, true, true, true], permutation_map = #[[$MAP1]]} : memref<4xf32>, vector<4x4x4x4xf32>
-//     CHECK:   %[[V2:.*]] = vector.transfer_read %{{.*}}[%[[C0]]], %[[CF]] {in_bounds = [true, true, true, true], permutation_map = #[[$MAP2]]} : memref<4xf32>, vector<4x4x4x4xf32>
-//     CHECK:   %[[V3:.*]] = vector.transfer_read %{{.*}}[%[[C0]], %[[C0]]], %[[CF]] {in_bounds = [true, true, true, true], permutation_map = #[[$MAP3]]} : memref<4x4xf32>, vector<4x4x4x4xf32>
+//     CHECK:   %[[V0tmp:.*]] = vector.transfer_read %{{.*}}[%[[C0]], %[[C0]]], %[[CF]] {in_bounds = [true, true]} : memref<4x4xf32>, vector<4x4xf32>
+//     CHECK:   %[[V0:.*]] = vector.broadcast %[[V0tmp]] : vector<4x4xf32> to vector<4x4x4x4xf32>
+//     CHECK:   %[[V1tmp:.*]] = vector.transfer_read %{{.*}}[%[[C0]]], %[[CF]] {in_bounds = [true]} : memref<4xf32>, vector<4xf32>
+//     CHECK:   %[[V1:.*]] = vector.broadcast %[[V1tmp]] : vector<4xf32> to vector<4x4x4x4xf32>
+//     CHECK:   %[[V2tmp:.*]] = vector.transfer_read %{{.*}}[%[[C0]]], %[[CF]] {in_bounds = [true]} : memref<4xf32>, vector<4xf32>
+//     CHECK:   %[[V2:.*]] = vector.broadcast %[[V2tmp]] : vector<4xf32> to vector<4x4x4x4xf32>
+//     CHECK:   %[[V3tmp:.*]] = vector.transfer_read %{{.*}}[%[[C0]], %[[C0]]], %[[CF]] {in_bounds = [true, true], permutation_map = #[[$MAP]]} : memref<4x4xf32>, vector<4x4xf32>
+//     CHECK:   %[[V3:.*]] = vector.broadcast %[[V3tmp]] : vector<4x4xf32> to vector<4x4x4x4xf32>
 //     CHECK:   %[[SUB:.*]] = arith.subf %[[V0]], %[[V1]] : vector<4x4x4x4xf32>
 //     CHECK:   %[[ADD0:.*]] = arith.addf %[[V2]], %[[SUB]] : vector<4x4x4x4xf32>
 //     CHECK:   %[[ADD1:.*]] = arith.addf %[[V3]], %[[ADD0]] : vector<4x4x4x4xf32>
@@ -651,13 +664,16 @@ transform.sequence failures(propagate) {
   iterator_types = ["parallel", "parallel", "parallel", "parallel"]
 }
 
-// CHECK-DAG: #[[MAP0:.*]] = affine_map<(d0, d1) -> (d1, d0, 0, 0)>
-// CHECK-DAG: #[[MAP1:.*]] = affine_map<(d0, d1) -> (0, d1, 0, d0)>
-// CHECK-DAG: #[[MAP2:.*]] = affine_map<(d0, d1, d2, d3) -> (d2, d1, d3, d0)>
+// CHECK-DAG: #[[MAP0:.*]] = affine_map<(d0, d1) -> (d1, d0)>
+// CHECK-DAG: #[[MAP1:.*]] = affine_map<(d0, d1, d2, d3) -> (d2, d1, d3, d0)>
 //       CHECK: func @vectorization_transpose
-//       CHECK: vector.transfer_read {{.*}}{in_bounds = [true, true, true, true], permutation_map = #[[MAP0]]} : memref<14x7xf32>, vector<7x14x8x16xf32>
-//       CHECK: vector.transfer_read {{.*}}{in_bounds = [true, true, true, true], permutation_map = #[[MAP1]]} : memref<16x14xf32>, vector<7x14x8x16xf32>
-//       CHECK: vector.transfer_read {{.*}}{in_bounds = [true, true, true, true], permutation_map = #[[MAP2]]} : memref<16x14x7x8xf32>, vector<7x14x8x16xf32>
+//       CHECK: vector.transfer_read {{.*}}{in_bounds = [true, true], permutation_map = #[[MAP0]]} : memref<14x7xf32>, vector<7x14xf32>
+//       CHECK: vector.broadcast {{.*}} : vector<7x14xf32> to vector<8x16x7x14xf32>
+//       CHECK: vector.transpose %{{.*}}, [2, 3, 0, 1] : vector<8x16x7x14xf32> to vector<7x14x8x16xf32>
+//       CHECK: vector.transfer_read {{.*}}{in_bounds = [true, true], permutation_map = #[[MAP0]]} : memref<16x14xf32>, vector<14x16xf32>
+//       CHECK: vector.broadcast {{.*}} : vector<14x16xf32> to vector<7x8x14x16xf32>
+//       CHECK: vector.transpose %{{.*}}, [0, 2, 1, 3] : vector<7x8x14x16xf32> to vector<7x14x8x16xf32>
+//       CHECK: vector.transfer_read {{.*}}{in_bounds = [true, true, true, true], permutation_map = #[[MAP1]]} : memref<16x14x7x8xf32>, vector<7x14x8x16xf32>
 //       CHECK: arith.addf {{.*}} : vector<7x14x8x16xf32>
 //       CHECK: arith.addf {{.*}} : vector<7x14x8x16xf32>
 //       CHECK: vector.transfer_write {{.*}} : vector<7x14x8x16xf32>, memref<7x14x8x16xf32>
@@ -689,10 +705,13 @@ transform.sequence failures(propagate) {
 func.func @matmul_tensors(
   %arg0: tensor<8x4xf32>, %arg1: tensor<4x12xf32>, %arg2: tensor<8x12xf32>)
     -> tensor<8x12xf32> {
-  //   CHECK-DAG:   %[[C0:.*]] = arith.constant 0 : index
-  //   CHECK-DAG:   %[[V0:.*]] = vector.transfer_read %[[ARG0]][%[[C0]], %[[C0]]], {{.*}} : tensor<8x4xf32>, vector<8x12x4xf32>
-  //   CHECK-DAG:   %[[V1:.*]] = vector.transfer_read %[[ARG1]][%[[C0]], %[[C0]]], {{.*}} : tensor<4x12xf32>, vector<8x12x4xf32>
-  //   CHECK-DAG:   %[[V2:.*]] = vector.transfer_read %[[ARG2]][%[[C0]], %[[C0]]], {{.*}} : tensor<8x12xf32>, vector<8x12xf32>
+  //   CHECK:   %[[C0:.*]] = arith.constant 0 : index
+  //   CHECK:   %[[V0tmp:.*]] = vector.transfer_read %[[ARG0]][%[[C0]], %[[C0]]], {{.*}} : tensor<8x4xf32>, vector<8x4xf32>
+  //   CHECK:   %[[V0tmp2:.*]] = vector.broadcast %[[V0tmp]] : vector<8x4xf32> to vector<12x8x4xf32>
+  //   CHECK:   %[[V0:.*]] = vector.transpose %[[V0tmp2]], [1, 0, 2] : vector<12x8x4xf32> to vector<8x12x4xf32>
+  //   CHECK:   %[[V1tmp:.*]] = vector.transfer_read %[[ARG1]][%[[C0]], %[[C0]]], {{.*}} : tensor<4x12xf32>, vector<12x4xf32>
+  //   CHECK:   %[[V1:.*]] = vector.broadcast %[[V1tmp]] : vector<12x4xf32> to vector<8x12x4xf32>
+  //   CHECK:   %[[V2:.*]] = vector.transfer_read %[[ARG2]][%[[C0]], %[[C0]]], {{.*}} : tensor<8x12xf32>, vector<8x12xf32>
   //
   // linalg matmul lowers gets expanded to a 3D reduction, canonicalization later
   // convert it to a 2D contract.
@@ -1045,22 +1064,23 @@ transform.sequence failures(propagate) {
 
 // -----
 
-// CHECK-DAG: #[[$M1:.*]] =  affine_map<(d0, d1) -> (d1, d0, 0, 0)>
-// CHECK-DAG: #[[$M2:.*]] =  affine_map<(d0, d1) -> (0, 0, d1, d0)>
-// CHECK-DAG: #[[$M3:.*]] =  affine_map<(d0, d1) -> (d1, d0)>
+// CHECK-DAG: #[[$MAP:.*]] =  affine_map<(d0, d1) -> (d1, d0)>
 
 // CHECK-LABEL: func @sum_exp_2
 func.func @sum_exp_2(%input: tensor<3x2xf32>, %input_2: tensor<5x4xf32>, %output: tensor<5x2xf32>)
   -> tensor<5x2xf32>
 {
-  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true, true, true], permutation_map = #[[$M1]]} : tensor<3x2xf32>, vector<2x3x4x5xf32>
-  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true, true, true], permutation_map = #[[$M2]]} : tensor<5x4xf32>, vector<2x3x4x5xf32>
-  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true], permutation_map = #[[$M3]]} : tensor<5x2xf32>, vector<2x5xf32>
+  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true], permutation_map = #[[$MAP]]} : tensor<3x2xf32>, vector<2x3xf32>
+  // CHECK: vector.broadcast %{{.*}} : vector<2x3xf32> to vector<4x5x2x3xf32>
+  // CHECK: vector.transpose %{{.*}}, [2, 3, 0, 1] : vector<4x5x2x3xf32> to vector<2x3x4x5xf32>
+  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true], permutation_map = #[[$MAP]]} : tensor<5x4xf32>, vector<4x5xf32>
+  // CHECK: vector.broadcast %{{.*}} : vector<4x5xf32> to vector<2x3x4x5xf32>
+  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true], permutation_map = #[[$MAP]]} : tensor<5x2xf32>, vector<2x5xf32>
   // CHECK: math.exp {{.*}} : vector<2x3x4x5xf32>
   // CHECK: math.exp {{.*}} : vector<2x3x4x5xf32>
   // CHECK: addf {{.*}} : vector<2x3x4x5xf32>
   // CHECK: vector.multi_reduction <add>, {{.*}}, %{{.*}}  [1, 2] : vector<2x3x4x5xf32> to vector<2x5xf32>
-  // CHECK: vector.transfer_write {{.*}} {in_bounds = [true, true], permutation_map = #[[$M3]]} : vector<2x5xf32>, tensor<5x2xf32>
+  // CHECK: vector.transfer_write {{.*}} {in_bounds = [true, true], permutation_map = #[[$MAP]]} : vector<2x5xf32>, tensor<5x2xf32>
   // CHECK: return {{.*}} : tensor<5x2xf32>
   %0 = linalg.generic {
       indexing_maps = [
@@ -1271,12 +1291,13 @@ transform.sequence failures(propagate) {
 
 // -----
 
-// CHECK-DAG: #[[$M5:.*]] = affine_map<(d0, d1) -> (d0, 0)>
+// CHECK-DAG: #[[$MAP:.*]] = affine_map<(d0, d1) -> (d0)>
 
 // CHECK-LABEL:   func @explicit_broadcast(
 func.func @explicit_broadcast(%arg0: tensor<4x4xf32>, %arg1: tensor<4x1xf32>) -> tensor<4x4xf32> {
   // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true]} : tensor<4x4xf32>, vector<4x4xf32>
-  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true], permutation_map = #[[$M5]]} : tensor<4x1xf32>, vector<4x4xf32>
+  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true], permutation_map = #[[$MAP]]} : tensor<4x1xf32>, vector<4xf32>
+  // CHECK: vector.broadcast %{{.*}} : vector<4xf32> to vector<4x4xf32>
   // CHECK: subf {{.*}} : vector<4x4xf32>
   // CHECK: vector.transfer_write {{.*}} {in_bounds = [true, true]} : vector<4x4xf32>, tensor<4x4xf32>
   %c0 = arith.constant 0.0 : f32
@@ -1305,12 +1326,13 @@ transform.sequence failures(propagate) {
 
 // -----
 
-// CHECK-DAG: #[[$M6:.*]] = affine_map<(d0, d1) -> (d0, 0)>
+// CHECK-DAG: #[[$MAP:.*]] = affine_map<(d0, d1) -> (d0)>
 
 // CHECK-LABEL:   func @fused_broadcast_red_2d
 func.func @fused_broadcast_red_2d(%arg0: tensor<4x4xf32>, %arg1: tensor<4x1xf32>) -> tensor<4xf32> {
   // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true]} : tensor<4x4xf32>, vector<4x4xf32>
-  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true, true], permutation_map = #[[$M6]]} : tensor<4x1xf32>, vector<4x4xf32>
+  // CHECK: vector.transfer_read {{.*}} {in_bounds = [true], permutation_map = #[[$MAP]]} : tensor<4x1xf32>, vector<4xf32>
+  // CHECK: vector.broadcast %{{.*}} : vector<4xf32> to vector<4x4xf32>
   // CHECK: subf {{.*}} : vector<4x4xf32>
   // CHECK: math.exp {{.*}} : vector<4x4xf32>
   // CHECK: vector.multi_reduction <add>, {{.*}}, {{.*}} : vector<4x4xf32> to vector<4xf32>
@@ -1444,7 +1466,9 @@ func.func @mixed_parallel_reduced_results(%arg0 : tensor<2x4x8xf32>,
 //  CHECK-SAME:     %[[ARG2:[a-zA-Z0-9]+]]: tensor<2x4x8xf32>
 //  CHECK-SAME:     %[[ARG3:[a-zA-Z0-9]+]]: tensor<2x4xf32>
 //   CHECK-DAG:   %[[V0:.+]] = vector.transfer_read %[[ARG0]]
-//   CHECK-DAG:   %[[V1:.+]] = vector.transfer_read %[[ARG1]]
+//   CHECK-DAG:   %[[V1tmp0:.+]] = vector.transfer_read %[[ARG1]]
+//   CHECK-DAG:   %[[V1tmp1:.+]] = vector.broadcast %[[V1tmp0]]
+//   CHECK-DAG:   %[[V1:.+]] = vector.transpose %[[V1tmp1]]
 //   CHECK-DAG:   %[[V2:.+]] = vector.transfer_read %[[ARG3]]
 //   CHECK-DAG:   %[[MUL:.+]] = arith.mulf %[[V0]], %[[V1]]
 //   CHECK-DAG:   %[[ADD:.+]] = vector.multi_reduction <add>, %[[MUL]], %[[V2]]

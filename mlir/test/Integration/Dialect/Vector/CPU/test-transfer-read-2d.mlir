@@ -62,47 +62,12 @@ func.func @transfer_read_2d_mask_transposed(
   return
 }
 
-// Vector load with mask + broadcast.
-func.func @transfer_read_2d_mask_broadcast(
-    %A : memref<?x?xf32>, %base1: index, %base2: index) {
-  %fm42 = arith.constant -42.0: f32
-  %mask = arith.constant dense<[1, 0, 1, 0, 1, 1, 1, 0, 1]> : vector<9xi1>
-  %f = vector.transfer_read %A[%base1, %base2], %fm42, %mask
-      {permutation_map = affine_map<(d0, d1) -> (0, d1)>} :
-    memref<?x?xf32>, vector<4x9xf32>
-  vector.print %f: vector<4x9xf32>
-  return
-}
-
-// Transpose + vector load with mask + broadcast.
-func.func @transfer_read_2d_mask_transpose_broadcast_last_dim(
-    %A : memref<?x?xf32>, %base1: index, %base2: index) {
-  %fm42 = arith.constant -42.0: f32
-  %mask = arith.constant dense<[1, 0, 1, 1]> : vector<4xi1>
-  %f = vector.transfer_read %A[%base1, %base2], %fm42, %mask
-      {permutation_map = affine_map<(d0, d1) -> (d1, 0)>} :
-    memref<?x?xf32>, vector<4x9xf32>
-  vector.print %f: vector<4x9xf32>
-  return
-}
-
 // Load + transpose.
 func.func @transfer_read_2d_transposed(
     %A : memref<?x?xf32>, %base1: index, %base2: index) {
   %fm42 = arith.constant -42.0: f32
   %f = vector.transfer_read %A[%base1, %base2], %fm42
       {permutation_map = affine_map<(d0, d1) -> (d1, d0)>} :
-    memref<?x?xf32>, vector<4x9xf32>
-  vector.print %f: vector<4x9xf32>
-  return
-}
-
-// Load 1D + broadcast to 2D.
-func.func @transfer_read_2d_broadcast(
-    %A : memref<?x?xf32>, %base1: index, %base2: index) {
-  %fm42 = arith.constant -42.0: f32
-  %f = vector.transfer_read %A[%base1, %base2], %fm42
-      {permutation_map = affine_map<(d0, d1) -> (d1, 0)>} :
     memref<?x?xf32>, vector<4x9xf32>
   vector.print %f: vector<4x9xf32>
   return
@@ -158,36 +123,17 @@ func.func @entry() {
       : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( ( 0, -42, 20, -42 ), ( -42, -42, 21, -42 ), ( 2, 12, 22, -42 ), ( -42, 13, 23, -42 ), ( -42, -42, -42, -42 ), ( -42, -42, -42, -42 ), ( -42, -42, -42, -42 ), ( -42, -42, -42, -42 ), ( -42, -42, -42, -42 ) )
 
-  // 5. Read 1D vector from 2D memref at specified location and broadcast the
-  //    result to 2D.
-  call @transfer_read_2d_broadcast(%A, %c1, %c2)
-      : (memref<?x?xf32>, index, index) -> ()
-  // CHECK: ( ( 12, 12, 12, 12, 12, 12, 12, 12, 12 ), ( 13, 13, 13, 13, 13, 13, 13, 13, 13 ), ( -42, -42, -42, -42, -42, -42, -42, -42, -42 ), ( -42, -42, -42, -42, -42, -42, -42, -42, -42 ) )
-
-  // 6. Read 1D vector from 2D memref at specified location with mask and
-  //    broadcast the result to 2D.
-  call @transfer_read_2d_mask_broadcast(%A, %c2, %c1)
-      : (memref<?x?xf32>, index, index) -> ()
-  // CHECK: ( ( 21, -42, 23, -42, -42, -42, -42, -42, -42 ), ( 21, -42, 23, -42, -42, -42, -42, -42, -42 ), ( 21, -42, 23, -42, -42, -42, -42, -42, -42 ), ( 21, -42, 23, -42, -42, -42, -42, -42, -42 ) )
-
-  // 7. Read 1D vector from 2D memref (second dimension) at specified location
-  //    with mask and broadcast the result to 2D. In this test case, mask
-  //    elements must be evaluated before lowering to an (N>1)-D transfer.
-  call @transfer_read_2d_mask_transpose_broadcast_last_dim(%A, %c0, %c1)
-      : (memref<?x?xf32>, index, index) -> ()
-  // CHECK: ( ( 1, 1, 1, 1, 1, 1, 1, 1, 1 ), ( -42, -42, -42, -42, -42, -42, -42, -42, -42 ), ( 3, 3, 3, 3, 3, 3, 3, 3, 3 ), ( -42, -42, -42, -42, -42, -42, -42, -42, -42 ) )
-
-  // 8. Write 2D vector into 2D memref at specified location.
+  // 5. Write 2D vector into 2D memref at specified location.
   call @transfer_write_2d(%A, %c1, %c2) : (memref<?x?xf32>, index, index) -> ()
 
-  // 9. Read memref to verify step 8.
+  // 6. Read memref to verify step 5.
   call @transfer_read_2d(%A, %c0, %c0) : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( ( 0, 1, 2, 3, -42, -42, -42, -42, -42 ), ( 10, 11, -1, -1, -42, -42, -42, -42, -42 ), ( 20, 21, 22, 23, -42, -42, -42, -42, -42 ), ( -42, -42, -42, -42, -42, -42, -42, -42, -42 ) )
 
-  // 10. Write 2D vector into 2D memref at specified location with mask.
+  // 7. Write 2D vector into 2D memref at specified location with mask.
   call @transfer_write_2d_mask(%A, %c0, %c2) : (memref<?x?xf32>, index, index) -> ()
 
-  // 11. Read memref to verify step 10.
+  // 8. Read memref to verify step 7.
   call @transfer_read_2d(%A, %c0, %c0) : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( ( 0, 1, -2, 3, -42, -42, -42, -42, -42 ), ( 10, 11, -1, -1, -42, -42, -42, -42, -42 ), ( 20, 21, 22, 23, -42, -42, -42, -42, -42 ), ( -42, -42, -42, -42, -42, -42, -42, -42, -42 ) )
 

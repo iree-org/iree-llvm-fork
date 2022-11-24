@@ -30,6 +30,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/Support/LLVM.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/bit.h"
@@ -2847,18 +2848,9 @@ static LogicalResult verifyPermutationMap(AffineMap permutationMap,
   SmallVector<bool, 8> seen(permutationMap.getNumInputs(), false);
   for (auto expr : permutationMap.getResults()) {
     auto dim = expr.dyn_cast<AffineDimExpr>();
-    auto zero = expr.dyn_cast<AffineConstantExpr>();
-    if (zero) {
-      if (zero.getValue() != 0) {
-        return emitOpError(
-            "requires a projected permutation_map (at most one dim or the zero "
-            "constant can appear in each result)");
-      }
-      continue;
-    }
     if (!dim) {
-      return emitOpError("requires a projected permutation_map (at most one "
-                         "dim or the zero constant can appear in each result)");
+      return emitOpError("requires a projected permutation_map (exactly one "
+                         "dim can appear in each result)");
     }
     if (seen[dim.getPosition()]) {
       return emitOpError(
@@ -2948,10 +2940,6 @@ verifyTransferOp(VectorTransferOpInterface op, ShapedType shapedType,
                              "as permutation_map results: ")
              << AffineMapAttr::get(permutationMap)
              << " vs inBounds of size: " << inBounds.size();
-    for (unsigned int i = 0; i < permutationMap.getNumResults(); ++i)
-      if (permutationMap.getResult(i).isa<AffineConstantExpr>() &&
-          !inBounds.getValue()[i].cast<BoolAttr>().getValue())
-        return op->emitOpError("requires broadcast dimensions to be in-bounds");
   }
 
   return success();
@@ -3119,8 +3107,7 @@ static LogicalResult foldTransferInBoundsAttribute(TransferOp op) {
     }
     // Currently out-of-bounds, check whether we can statically determine it is
     // inBounds.
-    auto dimExpr = permutationMap.getResult(i).dyn_cast<AffineDimExpr>();
-    assert(dimExpr && "Broadcast dims must be in-bounds");
+    auto dimExpr = permutationMap.getResult(i).cast<AffineDimExpr>();
     auto inBounds =
         isInBounds(op, /*resultIdx=*/i, /*indicesIdx=*/dimExpr.getPosition());
     newInBounds.push_back(inBounds);
@@ -3287,11 +3274,10 @@ public:
   }
 };
 
-/// Store to load forwarding for transfer operations with permuation maps.
+/// Store to load forwarding for transfer operations with permutation maps.
 /// Even if the permutation maps are different we can still propagate the store
 /// into the load if the size of the dimensions read and written match. Then we
-/// can replace the transfer_read + transfer_write by vector.broadcast and
-/// vector.transpose.
+/// can replace the transfer_read + transfer_write by vector.transpose.
 /// Example:
 /// ```
 /// %w0 = vector.transfer_write %v0, %arg0[%c0, %c0, %c0]
@@ -3300,67 +3286,59 @@ public:
 ///   vector<4x1xf32>, tensor<4x4x4xf32>
 ///  %r = vector.transfer_read %w0[%c0, %c0, %c0], %cf0
 ///   {in_bounds = [true, true, true, true],
-///   permutation_map = affine_map<(d0, d1, d2) -> (d1, 0, d2, 0)>} :
-///   tensor<4x4x4xf32>, vector<1x100x4x5xf32>
+///   permutation_map = affine_map<(d0, d1, d2) -> (d1, d2)>} :
+///   tensor<4x4x4xf32>, vector<1x4xf32>
 /// ```
 /// To:
 /// ```
-/// %0 = vector.broadcast %arg1 : vector<4x1xf32> to vector<100x5x4x1xf32>
-/// %r = vector.transpose %0, [3, 0, 2, 1] :
-///   vector<100x5x4x1xf32> to vector<1x100x4x5xf32>
+/// %r = vector.transpose %0, [1, 0] :
+///   vector<4x1xf32> to vector<1x4xf32>
 /// ```
-struct TransferReadAfterWriteToBroadcast
+struct TransferReadAfterWriteToTranspose
     : public OpRewritePattern<TransferReadOp> {
   using OpRewritePattern::OpRewritePattern;
 
   LogicalResult matchAndRewrite(TransferReadOp readOp,
                                 PatternRewriter &rewriter) const override {
     if (readOp.hasOutOfBoundsDim() ||
-        !readOp.getShapedType().isa<RankedTensorType>())
-      return failure();
+        !readOp.getShapedType().isa<RankedTensorType>()) {
+      return rewriter.notifyMatchFailure(
+          readOp, "not a read into ranked tensor with all dims inbounds");
+    }
     auto defWrite = readOp.getSource().getDefiningOp<vector::TransferWriteOp>();
     if (!defWrite)
-      return failure();
+      return rewriter.notifyMatchFailure(readOp, "not defined by a write");
 
     SmallVector<int64_t> readDims = readOp.getTransferChunkAccessed();
-    Value vec;
-    if (readOp.getIndices() == defWrite.getIndices() &&
-        readOp.getMask() == defWrite.getMask()) {
-      SmallVector<int64_t> writeDims = defWrite.getTransferChunkAccessed();
-      // TODO: If the writeDim is a superset of the read dims we could do an
-      // extract_strided_slice.
-      if (writeDims == readDims)
-        vec = defWrite.getVector();
-    }
+    if (readOp.getIndices() != defWrite.getIndices())
+      return rewriter.notifyMatchFailure(readOp, "not defined by a write");
+    if (readOp.getMask() != defWrite.getMask())
+      return rewriter.notifyMatchFailure(readOp, "non-matching masks");
+    // TODO: If the writeDim is a superset of the read dims we could do an
+    // extract_strided_slice.
+    SmallVector<int64_t> writeDims = defWrite.getTransferChunkAccessed();
+    if (writeDims != readDims)
+      return rewriter.notifyMatchFailure(
+          readOp, "non-matching masks read/write transfer chunks accessed");
     // TODO: loop through the chain of transfer_write if we can prove that they
     // don't overlap with the transfer_read. This requires improving
     // `isDisjointTransferIndices` helper.
-    if (!vec)
-      return failure();
-    SmallVector<unsigned> permutation;
+    Value vec = defWrite.getVector();
     AffineMap readMap = compressUnusedDims(readOp.getPermutationMap());
     AffineMap writeMap = compressUnusedDims(defWrite.getPermutationMap());
     AffineMap map = readMap.compose(writeMap);
     if (map.getNumResults() == 0)
-      return failure();
-    // Calculate the permuation to apply to go from the vector stored to the
+      return rewriter.notifyMatchFailure(readOp,
+                                         "0-result composed permutation map");
+    // Calculate the permutation to apply to go from the vector stored to the
     // vector read.
-    if (!map.isPermutationOfMinorIdentityWithBroadcasting(permutation))
-      return failure();
-
-    Location loc = readOp.getLoc();
-    // Calculate the broadcast shape by applying the reverse permuation to the
-    // final shape we want.
-    ArrayRef<int64_t> destShape = readOp.getVectorType().getShape();
-    SmallVector<int64_t> broadcastShape(destShape.size());
-    for (const auto &pos : llvm::enumerate(permutation))
-      broadcastShape[pos.value()] = destShape[pos.index()];
-    VectorType broadcastedType = VectorType::get(
-        broadcastShape, defWrite.getVectorType().getElementType());
-    vec = rewriter.create<vector::BroadcastOp>(loc, broadcastedType, vec);
-    SmallVector<int64_t> transposePerm(permutation.begin(), permutation.end());
+    auto maybePermutation = map.getDimPermutationVector();
+    if (failed(maybePermutation)) {
+      return rewriter.notifyMatchFailure(
+          readOp, "no permutation map exists between write and read map");
+    }
     rewriter.replaceOpWithNewOp<vector::TransposeOp>(readOp, vec,
-                                                     transposePerm);
+                                                     *maybePermutation);
     return success();
   }
 };
@@ -3369,7 +3347,7 @@ struct TransferReadAfterWriteToBroadcast
 void TransferReadOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                                  MLIRContext *context) {
   results
-      .add<FoldExtractSliceIntoTransferRead, TransferReadAfterWriteToBroadcast>(
+      .add<FoldExtractSliceIntoTransferRead, TransferReadAfterWriteToTranspose>(
           context);
 }
 
@@ -3492,11 +3470,6 @@ LogicalResult TransferWriteOp::verify() {
 
   if (llvm::size(getIndices()) != shapedType.getRank())
     return emitOpError("requires ") << shapedType.getRank() << " indices";
-
-  // We do not allow broadcast dimensions on TransferWriteOps for the moment,
-  // as the semantics is unclear. This can be revisited later if necessary.
-  if (hasBroadcastDim())
-    return emitOpError("should not have broadcast dimensions");
 
   if (failed(verifyTransferOp(cast<VectorTransferOpInterface>(getOperation()),
                               shapedType, vectorType, maskType, permutationMap,

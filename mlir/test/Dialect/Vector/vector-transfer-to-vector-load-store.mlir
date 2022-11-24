@@ -25,16 +25,15 @@ func.func @vector_transfer_ops_0d_memref(%M: memref<f32>, %v: vector<1x1x1xf32>)
 
 // CHECK-LABEL: func @vector_transfer_ops_0d_tensor(
 //  CHECK-SAME:   %[[SOURCE:.*]]: tensor<f32>
-func.func @vector_transfer_ops_0d_tensor(%M: tensor<f32>) -> vector<1xf32> {
+func.func @vector_transfer_ops_0d_tensor(%M: tensor<f32>) -> vector<f32> {
     %f0 = arith.constant 0.0 : f32
 
-//  CHECK-NEXT:   %[[S:.*]] = tensor.extract %[[SOURCE]][] : tensor<f32>
-//  CHECK-NEXT:   %[[V:.*]] = vector.broadcast %[[S]] : f32 to vector<1xf32>
-    %0 = vector.transfer_read %M[], %f0 {permutation_map = affine_map<()->(0)>} :
-      tensor<f32>, vector<1xf32>
+// Does not need to lower frther, 0-D is naturally supported.
+//  CHECK:   %[[V:.*]] = vector.transfer_read %[[SOURCE]][]{{.*}} : tensor<f32>, vector<f32>
+    %0 = vector.transfer_read %M[], %f0 : tensor<f32>, vector<f32>
 
 //  CHECK-NEXT:   return %[[V]]
-    return %0: vector<1xf32>
+    return %0: vector<f32>
 }
 
 // -----
@@ -191,25 +190,6 @@ func.func @transfer_perm_map(%mem : memref<8x8xf32>, %i : index) -> vector<4xf32
 
 // -----
 
-// Lowering of transfer_read with broadcasting is supported (note that a `load`
-// is generated instead of a `vector.load`).
-// CHECK-LABEL:   func @transfer_broadcasting(
-// CHECK-SAME:                                %[[MEM:.*]]: memref<8x8xf32>,
-// CHECK-SAME:                                %[[IDX:.*]]: index) -> vector<4xf32> {
-// CHECK-NEXT:      %[[LOAD:.*]] = memref.load %[[MEM]][%[[IDX]], %[[IDX]]] : memref<8x8xf32>
-// CHECK-NEXT:      %[[RES:.*]] = vector.broadcast %[[LOAD]] : f32 to vector<4xf32>
-// CHECK-NEXT:      return %[[RES]] : vector<4xf32>
-// CHECK-NEXT:    }
-
-#broadcast = affine_map<(d0, d1) -> (0)>
-func.func @transfer_broadcasting(%mem : memref<8x8xf32>, %i : index) -> vector<4xf32> {
-  %cf0 = arith.constant 0.0 : f32
-  %res = vector.transfer_read %mem[%i, %i], %cf0 {in_bounds = [true], permutation_map = #broadcast} : memref<8x8xf32>, vector<4xf32>
-  return %res : vector<4xf32>
-}
-
-// -----
-
 // CHECK-LABEL:   func @transfer_scalar(
 // CHECK-SAME:                          %[[MEM:.*]]: memref<?x?xf32>,
 // CHECK-SAME:                          %[[IDX:.*]]: index) -> vector<1xf32> {
@@ -225,102 +205,20 @@ func.func @transfer_scalar(%mem : memref<?x?xf32>, %i : index) -> vector<1xf32> 
 
 // -----
 
-// An example with two broadcasted dimensions.
-// CHECK-LABEL:   func @transfer_broadcasting_2D(
-// CHECK-SAME:                                %[[MEM:.*]]: memref<8x8xf32>,
-// CHECK-SAME:                                %[[IDX:.*]]: index) -> vector<4x4xf32> {
-// CHECK-NEXT:      %[[LOAD:.*]] = memref.load %[[MEM]][%[[IDX]], %[[IDX]]] : memref<8x8xf32>
-// CHECK-NEXT:      %[[RES:.*]] = vector.broadcast %[[LOAD]] : f32 to vector<4x4xf32>
-// CHECK-NEXT:      return %[[RES]] : vector<4x4xf32>
-// CHECK-NEXT:    }
-
-#broadcast = affine_map<(d0, d1) -> (0, 0)>
-func.func @transfer_broadcasting_2D(%mem : memref<8x8xf32>, %i : index) -> vector<4x4xf32> {
-  %cf0 = arith.constant 0.0 : f32
-  %res = vector.transfer_read %mem[%i, %i], %cf0 {in_bounds = [true, true], permutation_map = #broadcast} : memref<8x8xf32>, vector<4x4xf32>
-  return %res : vector<4x4xf32>
-}
-
-// -----
-
-// More complex broadcasting case (here a `vector.load` is generated).
-// CHECK-LABEL:   func @transfer_broadcasting_complex(
-// CHECK-SAME:                                %[[MEM:.*]]: memref<10x20x30x8x8xf32>,
-// CHECK-SAME:                                %[[IDX:.*]]: index) -> vector<3x2x4x5xf32> {
-// CHECK-NEXT:      %[[LOAD:.*]] = vector.load %[[MEM]][%[[IDX]], %[[IDX]], %[[IDX]], %[[IDX]], %[[IDX]]] : memref<10x20x30x8x8xf32>, vector<3x1x1x5xf32>
-// CHECK-NEXT:      %[[RES:.*]] = vector.broadcast %[[LOAD]] : vector<3x1x1x5xf32> to vector<3x2x4x5xf32>
-// CHECK-NEXT:      return %[[RES]] : vector<3x2x4x5xf32>
-// CHECK-NEXT:    }
-
-#broadcast = affine_map<(d0, d1, d2, d3, d4) -> (d1, 0, 0, d4)>
-func.func @transfer_broadcasting_complex(%mem : memref<10x20x30x8x8xf32>, %i : index) -> vector<3x2x4x5xf32> {
-  %cf0 = arith.constant 0.0 : f32
-  %res = vector.transfer_read %mem[%i, %i, %i, %i, %i], %cf0 {in_bounds = [true, true, true, true], permutation_map = #broadcast} : memref<10x20x30x8x8xf32>, vector<3x2x4x5xf32>
-  return %res : vector<3x2x4x5xf32>
-}
-
-// -----
-
-#map0 = affine_map<(d0, d1, d2, d3) -> (d1, d0, 0, 0)>
-#map1 = affine_map<(d0, d1, d2, d3) -> (0, d1, 0, d0)>
-#map2 = affine_map<(d0, d1, d2, d3) -> (d3, d1, 0, 0)>
-#map3 = affine_map<(d0, d1) -> (d1, d0, 0, 0)>
-#map4 = affine_map<(d0, d1) -> (0, d1, 0, d0)>
-#map5 = affine_map<(d0, d1, d2, d3) -> (d2, d1, d3, d0)>
-#map6 = affine_map<(d0, d1) -> (0)>
-
-// CHECK-DAG: #[[$MAP0:.*]] = affine_map<(d0, d1, d2, d3) -> (d0, d1, 0, 0)>
-// CHECK-DAG: #[[$MAP1:.*]] = affine_map<(d0, d1, d2, d3) -> (d1, 0, d3)>
+#map = affine_map<(d0, d1, d2, d3) -> (d2, d1, d3, d0)>
 
 // CHECK-LABEL: func @transfer_read_permutations
-func.func @transfer_read_permutations(%arg0 : memref<?x?xf32>, %arg1 : memref<?x?x?x?xf32>, %m: i1)
-    -> (vector<7x14x8x16xf32>, vector<7x14x8x16xf32>, vector<7x14x8x16xf32>,
-       vector<7x14x8x16xf32>, vector<7x14x8x16xf32>, vector<7x14x8x16xf32>, vector<8xf32>) {
+func.func @transfer_read_permutations(%arg0 : memref<?x?xf32>, %arg1 : memref<?x?x?x?xf32>, %m: i1) -> vector<7x14x8x16xf32> {
 // CHECK-DAG: %[[CF0:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK-DAG: %[[C0:.*]] = arith.constant 0 : index
   %cst = arith.constant 0.000000e+00 : f32
   %c0 = arith.constant 0 : index
 
-// CHECK: %[[MASK0:.*]] = vector.splat %{{.*}} : vector<14x7xi1>
-  %mask0 = vector.splat %m : vector<7x14xi1>
-  %0 = vector.transfer_read %arg1[%c0, %c0, %c0, %c0], %cst, %mask0 {in_bounds = [true, false, true, true], permutation_map = #map0} : memref<?x?x?x?xf32>, vector<7x14x8x16xf32>
-// CHECK: vector.transfer_read {{.*}} %[[MASK0]] {in_bounds = [false, true, true, true], permutation_map = #[[$MAP0]]} : memref<?x?x?x?xf32>, vector<14x7x8x16xf32>
-// CHECK: vector.transpose %{{.*}}, [1, 0, 2, 3] : vector<14x7x8x16xf32> to vector<7x14x8x16xf32>
-
-// CHECK: %[[MASK1:.*]] = vector.splat %{{.*}} : vector<16x14xi1>
-  %mask1 = vector.splat %m : vector<14x16xi1>
-  %1 = vector.transfer_read %arg1[%c0, %c0, %c0, %c0], %cst, %mask1 {permutation_map = #map1} : memref<?x?x?x?xf32>, vector<7x14x8x16xf32>
-// CHECK: vector.transfer_read {{.*}} %[[MASK1]] {permutation_map = #[[$MAP0]]} : memref<?x?x?x?xf32>, vector<16x14x7x8xf32>
-// CHECK: vector.transpose %{{.*}}, [2, 1, 3, 0] : vector<16x14x7x8xf32> to vector<7x14x8x16xf32>
-
-// CHECK: %[[MASK3:.*]] = vector.splat %{{.*}} : vector<14x7xi1>
-  %mask2 = vector.splat %m : vector<7x14xi1>
-  %2 = vector.transfer_read %arg1[%c0, %c0, %c0, %c0], %cst, %mask2 {in_bounds = [true, false, true, true], permutation_map = #map2} : memref<?x?x?x?xf32>, vector<7x14x8x16xf32>
-// CHECK: vector.transfer_read {{.*}} %[[MASK3]] {in_bounds = [false, true, true], permutation_map = #[[$MAP1]]} : memref<?x?x?x?xf32>, vector<14x16x7xf32>
-// CHECK: vector.broadcast %{{.*}} : vector<14x16x7xf32> to vector<8x14x16x7xf32>
-// CHECK: vector.transpose %{{.*}}, [3, 1, 0, 2] : vector<8x14x16x7xf32> to vector<7x14x8x16xf32>
-
-  %3 = vector.transfer_read %arg0[%c0, %c0], %cst {permutation_map = #map3} : memref<?x?xf32>, vector<7x14x8x16xf32>
-// CHECK: vector.transfer_read %{{.*}}[%[[C0]], %[[C0]]], %[[CF0]] : memref<?x?xf32>, vector<14x7xf32>
-// CHECK: vector.broadcast %{{.*}} : vector<14x7xf32> to vector<8x16x14x7xf32>
-// CHECK: vector.transpose %{{.*}}, [3, 2, 0, 1] : vector<8x16x14x7xf32> to vector<7x14x8x16xf32>
-
-  %4 = vector.transfer_read %arg0[%c0, %c0], %cst {permutation_map = #map4} : memref<?x?xf32>, vector<7x14x8x16xf32>
-// CHECK: vector.transfer_read %{{.*}}[%[[C0]], %[[C0]]], %[[CF0]] : memref<?x?xf32>, vector<16x14xf32>
-// CHECK: vector.broadcast %{{.*}} : vector<16x14xf32> to vector<7x8x16x14xf32>
-// CHECK: vector.transpose %{{.*}}, [0, 3, 1, 2] : vector<7x8x16x14xf32> to vector<7x14x8x16xf32>
-
-  %5 = vector.transfer_read %arg1[%c0, %c0, %c0, %c0], %cst {permutation_map = #map5} : memref<?x?x?x?xf32>, vector<7x14x8x16xf32>
+  %0 = vector.transfer_read %arg1[%c0, %c0, %c0, %c0], %cst {permutation_map = #map} : memref<?x?x?x?xf32>, vector<7x14x8x16xf32>
 // CHECK: vector.transfer_read %{{.*}}[%[[C0]], %[[C0]], %[[C0]], %[[C0]]], %[[CF0]] : memref<?x?x?x?xf32>, vector<16x14x7x8xf32>
 // CHECK: vector.transpose %{{.*}}, [2, 1, 3, 0] : vector<16x14x7x8xf32> to vector<7x14x8x16xf32>
 
-  %6 = vector.transfer_read %arg0[%c0, %c0], %cst {permutation_map = #map6} : memref<?x?xf32>, vector<8xf32>
-// CHECK: memref.load %{{.*}}[%[[C0]], %[[C0]]] : memref<?x?xf32>
-// CHECK: vector.broadcast %{{.*}} : f32 to vector<8xf32>
-
-  return %0, %1, %2, %3, %4, %5, %6 : vector<7x14x8x16xf32>, vector<7x14x8x16xf32>,
-         vector<7x14x8x16xf32>, vector<7x14x8x16xf32>, vector<7x14x8x16xf32>,
-         vector<7x14x8x16xf32>, vector<8xf32>
+  return %0 : vector<7x14x8x16xf32>
 }
 
 // -----

@@ -86,17 +86,6 @@ func.func @transfer_read_1d_non_unit_stride(%A : memref<?x?xf32>) {
   return
 }
 
-// Broadcast.
-func.func @transfer_read_1d_broadcast(
-    %A : memref<?x?xf32>, %base1 : index, %base2 : index) {
-  %fm42 = arith.constant -42.0: f32
-  %f = vector.transfer_read %A[%base1, %base2], %fm42
-      {permutation_map = affine_map<(d0, d1) -> (0)>}
-      : memref<?x?xf32>, vector<9xf32>
-  vector.print %f: vector<9xf32>
-  return
-}
-
 // Non-contiguous, strided load.
 func.func @transfer_read_1d_in_bounds(
     %A : memref<?x?xf32>, %base1 : index, %base2 : index) {
@@ -190,34 +179,28 @@ func.func @entry() {
   call @transfer_read_1d(%A, %c0, %c2) : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( 2, 12, 22, -1, -1, -42, -42, -42, -42 )
 
-  // 6. Read a scalar from a 2D memref and broadcast the value to a 1D vector.
-  //    Generates a loop with vector.insertelement.
-  call @transfer_read_1d_broadcast(%A, %c1, %c2)
-      : (memref<?x?xf32>, index, index) -> ()
-  // CHECK: ( 12, 12, 12, 12, 12, 12, 12, 12, 12 )
-
-  // 7. Read from 2D memref on first dimension. Accesses are in-bounds, so no
+  // 6. Read from 2D memref on first dimension. Accesses are in-bounds, so no
   //    if-check is generated inside the generated loop.
   call @transfer_read_1d_in_bounds(%A, %c1, %c2)
       : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( 12, 22, -1 )
 
-  // 8. Optional mask attribute is specified and, in addition, there may be
+  // 7. Optional mask attribute is specified and, in addition, there may be
   //    out-of-bounds accesses.
   call @transfer_read_1d_mask(%A, %c1, %c2)
       : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( 12, -42, -1, -42, -42, -42, -42, -42, -42 )
 
-  // 9. Same as 8, but accesses are in-bounds.
+  // 8. Same as 7, but accesses are in-bounds.
   call @transfer_read_1d_mask_in_bounds(%A, %c1, %c2)
       : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( 12, -42, -1 )
 
-  // 10. Write to 2D memref on first dimension with a mask.
+  // 9. Write to 2D memref on first dimension with a mask.
   call @transfer_write_1d_mask(%A, %c1, %c0)
       : (memref<?x?xf32>, index, index) -> ()
 
-  // 11. (Same as 1. To check if 10 works correctly.)
+  // 10. (Same as 1. To check if 9 works correctly.)
   call @transfer_read_1d(%A, %c0, %c0) : (memref<?x?xf32>, index, index) -> ()
   // CHECK: ( 0, -2, 20, -2, 40, -42, -42, -42, -42 )
 

@@ -12,6 +12,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/MathExtras.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringRef.h"
@@ -142,9 +143,32 @@ bool AffineMap::isMinorIdentityWithBroadcasting(
   return true;
 }
 
+/// Return a permutation vector encoding the permutation of the map's results.
+/// This is computed once the unused dims and symbols are compressed away.
+/// Return failure if the compressed map is not exactly a permutation.
+FailureOr<SmallVector<int64_t>> AffineMap::getDimPermutationVector() const {
+  AffineMap compressedMap = compressUnusedSymbols(compressUnusedDims(*this));
+  SmallVector<int64_t> res(compressedMap.getNumResults(), -1);
+  if (!compressedMap.isPermutation())
+    return failure();
+  int64_t idx = 0;
+  for (AffineExpr expr : compressedMap.getResults()) {
+    auto dimExpr = expr.dyn_cast<AffineDimExpr>();
+    if (!dimExpr)
+      return failure();
+    res[idx++] = dimExpr.getPosition();
+  }
+  // Should be guaranteed by isPermutation.
+  assert(llvm::all_of(res, [](int64_t v) { return v >= 0; }) &&
+         "expected nonnegative");
+  return res;
+}
+
 /// Return true if this affine map can be converted to a minor identity with
-/// broadcast by doing a permute. Return a permutation (there may be
-/// several) to apply to get to a minor identity with broadcasts.
+/// by a permutation. If `allowBroadcast` is specified, additionally treat `0`
+/// as broadcasts.
+/// Return a permutation (not guarateed unique) to apply to get to a minor
+/// identity.
 /// Ex:
 ///  * (d0, d1, d2) -> (0, d1) maps to minor identity (d1, 0 = d2) with
 ///  perm = [1, 0] and broadcast d2
@@ -156,7 +180,7 @@ bool AffineMap::isMinorIdentityWithBroadcasting(
 ///  leading broadcat dimensions. The map returned would be (0, 0, d0, d1) with
 ///  perm = [3, 0, 1, 2]
 bool AffineMap::isPermutationOfMinorIdentityWithBroadcasting(
-    SmallVectorImpl<unsigned> &permutedDims) const {
+    SmallVectorImpl<unsigned> &permutedDims, bool allowBroadcast) const {
   unsigned projectionStart =
       getNumResults() < getNumInputs() ? getNumInputs() - getNumResults() : 0;
   permutedDims.clear();
@@ -175,7 +199,7 @@ bool AffineMap::isPermutationOfMinorIdentityWithBroadcasting(
     // Each result may be either a constant 0 (broadcast dimension) or a
     // dimension.
     if (auto constExpr = expr.dyn_cast<AffineConstantExpr>()) {
-      if (constExpr.getValue() != 0)
+      if (!allowBroadcast || constExpr.getValue() != 0)
         return false;
       broadcastDims.push_back(resIdx);
     } else if (auto dimExpr = expr.dyn_cast<AffineDimExpr>()) {
@@ -189,7 +213,7 @@ bool AffineMap::isPermutationOfMinorIdentityWithBroadcasting(
       return false;
     }
   }
-  // Find a permuation for the broadcast dimension. Since they are broadcasted
+  // Find a permutation for the broadcast dimension. Since they are broadcasted
   // any valid permutation is acceptable. We just permute the dim into a slot
   // without an existing dimension.
   unsigned pos = 0;

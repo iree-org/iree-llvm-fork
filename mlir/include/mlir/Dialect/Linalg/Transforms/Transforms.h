@@ -26,14 +26,15 @@
 #include "llvm/ADT/SmallSet.h"
 
 namespace mlir {
+
+class FrozenRewritePatternSet;
+class RewriterBase;
+
 namespace bufferization {
 class BufferizeTypeConverter;
 } // namespace bufferization
 
-class FrozenRewritePatternSet;
-
 namespace linalg {
-
 struct LinalgElementwiseFusionOptions;
 struct LinalgFusionOptions;
 struct LinalgTilingOptions;
@@ -364,7 +365,7 @@ LogicalResult promoteSubviewsPrecondition(Operation *op,
                                           LinalgPromotionOptions options);
 
 /// Return success if the operation can be vectorized.
-LogicalResult vectorizeLinalgOpPrecondition(LinalgOp linalgOp);
+LogicalResult vectorizeLinalgOpPrecondition(RewriterBase &b, LinalgOp linalgOp);
 
 //===----------------------------------------------------------------------===//
 // Transformations exposed as rewrite patterns.

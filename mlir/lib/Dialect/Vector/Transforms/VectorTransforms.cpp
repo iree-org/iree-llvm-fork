@@ -1522,7 +1522,7 @@ namespace {
 /// This unrolls outer-products along the reduction dimension.
 struct UnrolledOuterProductGenerator
     : public StructuredGenerator<vector::ContractionOp, vector::IteratorType> {
-  UnrolledOuterProductGenerator(OpBuilder &builder, vector::ContractionOp op)
+  UnrolledOuterProductGenerator(RewriterBase &builder, vector::ContractionOp op)
       : StructuredGenerator<vector::ContractionOp, vector::IteratorType>(
             builder, op),
         kind(op.getKind()), lhs(op.getLhs()), rhs(op.getRhs()),

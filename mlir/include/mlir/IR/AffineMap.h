@@ -16,6 +16,7 @@
 
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/SmallBitVector.h"
@@ -117,6 +118,11 @@ public:
   bool isMinorIdentityWithBroadcasting(
       SmallVectorImpl<unsigned> *broadcastedDims = nullptr) const;
 
+  /// Return a permutation vector encoding the permutation of the map's results.
+  /// This is computed once the unused dims and symbols are compressed away.
+  /// Return failure if the compressed map is not exactly a permutation.
+  FailureOr<SmallVector<int64_t>> getDimPermutationVector() const;
+
   /// Return true if this affine map can be converted to a minor identity with
   /// broadcast by doing a permute. Return a permutation (there may be
   /// several) to apply to get to a minor identity with broadcasts.
@@ -125,13 +131,14 @@ public:
   ///  perm = [1, 0] and broadcast d2
   ///  * (d0, d1, d2) -> (d0, 0) cannot be mapped to a minor identity by
   ///  permutation + broadcast
-  ///  * (d0, d1, d2, d3) -> (0, d1, d3) maps to minor identity (d1, 0 = d2, d3)
-  ///  with perm = [1, 0, 2] and broadcast d2
+  ///  * (d0, d1, d2, d3) -> (0, d1, d3) maps to minor identity (d1, 0 = d2,
+  ///  d3) with perm = [1, 0, 2] and broadcast d2
   ///  * (d0, d1) -> (d1, 0, 0, d0) maps to minor identity (d0, d1) with extra
   ///  leading broadcat dimensions. The map returned would be (0, 0, d0, d1)
   ///  with perm = [3, 0, 1, 2]
   bool isPermutationOfMinorIdentityWithBroadcasting(
-      SmallVectorImpl<unsigned> &permutedDims) const;
+      SmallVectorImpl<unsigned> &permutedDims,
+      bool allowBroadcast = false) const;
 
   /// Returns true if this affine map is an empty map, i.e., () -> ().
   bool isEmpty() const;
@@ -142,12 +149,12 @@ public:
   /// Returns true if this affine map has only constant results.
   bool isConstant() const;
 
-  /// Returns the constant result of this map. This methods asserts that the map
-  /// has a single constant result.
+  /// Returns the constant result of this map. This methods asserts that the
+  /// map has a single constant result.
   int64_t getSingleConstantResult() const;
 
-  /// Returns the constant results of this map. This method asserts that the map
-  /// has all constant results.
+  /// Returns the constant results of this map. This method asserts that the
+  /// map has all constant results.
   SmallVector<int64_t> getConstantResults() const;
 
   // Prints affine map to 'os'.
@@ -177,7 +184,8 @@ public:
     });
   }
 
-  /// Return true if any affine expression involves AffineSymbolExpr `position`.
+  /// Return true if any affine expression involves AffineSymbolExpr
+  /// `position`.
   bool isFunctionOfSymbol(unsigned position) const {
     return llvm::any_of(getResults(), [&](AffineExpr e) {
       return e.isFunctionOfSymbol(position);
@@ -189,24 +197,24 @@ public:
   void walkExprs(llvm::function_ref<void(AffineExpr)> callback) const;
 
   /// This method substitutes any uses of dimensions and symbols (e.g.
-  /// dim#0 with dimReplacements[0]) in subexpressions and returns the modified
-  /// expression mapping.  Because this can be used to eliminate dims and
-  /// symbols, the client needs to specify the number of dims and symbols in
-  /// the result.  The returned map always has the same number of results.
+  /// dim#0 with dimReplacements[0]) in subexpressions and returns the
+  /// modified expression mapping.  Because this can be used to eliminate dims
+  /// and symbols, the client needs to specify the number of dims and symbols
+  /// in the result.  The returned map always has the same number of results.
   AffineMap replaceDimsAndSymbols(ArrayRef<AffineExpr> dimReplacements,
                                   ArrayRef<AffineExpr> symReplacements,
                                   unsigned numResultDims,
                                   unsigned numResultSyms) const;
 
-  /// Sparse replace method. Apply AffineExpr::replace(`expr`, `replacement`) to
-  /// each of the results and return a new AffineMap with the new results and
-  /// with the specified number of dims and symbols.
+  /// Sparse replace method. Apply AffineExpr::replace(`expr`, `replacement`)
+  /// to each of the results and return a new AffineMap with the new results
+  /// and with the specified number of dims and symbols.
   AffineMap replace(AffineExpr expr, AffineExpr replacement,
                     unsigned numResultDims, unsigned numResultSyms) const;
 
   /// Sparse replace method. Apply AffineExpr::replace(`map`) to each of the
-  /// results and return a new AffineMap with the new results and with inferred
-  /// number of dims and symbols.
+  /// results and return a new AffineMap with the new results and with
+  /// inferred number of dims and symbols.
   AffineMap replace(const DenseMap<AffineExpr, AffineExpr> &map) const;
 
   /// Sparse replace method. Apply AffineExpr::replace(`map`) to each of the
@@ -271,11 +279,11 @@ public:
                              SmallVectorImpl<Attribute> &results) const;
 
   /// Propagates the constant operands into this affine map. Operands are
-  /// allowed to be null, at which point they are treated as non-constant. This
-  /// does not change the number of symbols and dimensions. Returns a new map,
-  /// which may be equal to the old map if no folding happened. If `results` is
-  /// provided and if all expressions in the map were folded to constants,
-  /// `results` will contain the values of these constants.
+  /// allowed to be null, at which point they are treated as non-constant.
+  /// This does not change the number of symbols and dimensions. Returns a new
+  /// map, which may be equal to the old map if no folding happened. If
+  /// `results` is provided and if all expressions in the map were folded to
+  /// constants, `results` will contain the values of these constants.
   AffineMap
   partialConstantFold(ArrayRef<Attribute> operandConstants,
                       SmallVectorImpl<int64_t> *results = nullptr) const;
@@ -300,8 +308,8 @@ public:
   /// returns the resulting values. `this` must be symbol-less.
   SmallVector<int64_t, 4> compose(ArrayRef<int64_t> values) const;
 
-  /// Returns true if the AffineMap represents a subset (i.e. a projection) of a
-  /// symbol-less permutation map. `allowZeroInResults` allows projected
+  /// Returns true if the AffineMap represents a subset (i.e. a projection) of
+  /// a symbol-less permutation map. `allowZeroInResults` allows projected
   /// permutation maps with constant zero result expressions.
   /// TODO: Remove `allowZeroInResults` when constant zero result expressions
   /// are broadly supported.
@@ -313,7 +321,8 @@ public:
   /// Returns the map consisting of the `resultPos` subset.
   AffineMap getSubMap(ArrayRef<unsigned> resultPos) const;
 
-  /// Returns the map consisting of `length` expressions starting from `start`.
+  /// Returns the map consisting of `length` expressions starting from
+  /// `start`.
   AffineMap getSliceMap(unsigned start, unsigned length) const;
 
   /// Returns the map consisting of the most major `numResults` results.
@@ -328,8 +337,9 @@ public:
 
   /// Get the largest known divisor of all map expressions.
   /// For eg: for (d0, d1) -> (8*d0 + 4, 4*d1 + 2), the result is 2.
-  /// In the case of maps with no expressions or all zero constant expressions,
-  /// the largest known divisor is trivially the max uint64_t value.
+  /// In the case of maps with no expressions or all zero constant
+  /// expressions, the largest known divisor is trivially the max uint64_t
+  /// value.
   uint64_t getLargestKnownDivisorOfMapExprs();
 
   friend ::llvm::hash_code hash_value(AffineMap arg);
