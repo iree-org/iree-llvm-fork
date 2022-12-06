@@ -171,6 +171,12 @@ public:
   /// found in results.
   Optional<unsigned> getResultPosition(AffineExpr input) const;
 
+  /// Extracts the permuted position where the given input index resides.
+  /// Returns `llvm::None` if the input index is projected. Asserts on
+  /// non-projected permutation maps.
+  Optional<unsigned>
+  getPermutedPositionOfProjectedPermutation(unsigned input) const;
+
   /// Return true if any affine expression involves AffineDimExpr `position`.
   bool isFunctionOfDim(unsigned position) const {
     return llvm::any_of(getResults(), [&](AffineExpr e) {

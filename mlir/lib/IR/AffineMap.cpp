@@ -340,6 +340,18 @@ Optional<unsigned> AffineMap::getResultPosition(AffineExpr input) const {
   return llvm::None;
 }
 
+/// Extracts the permuted position where the given input index resides.
+/// Returns `llvm::None` if the input index is projected. Asserts on
+/// non-projected permutation maps.
+Optional<unsigned>
+AffineMap::getPermutedPositionOfProjectedPermutation(unsigned input) const {
+  assert(isProjectedPermutation() && "invalid projected permutation request");
+  for (unsigned i = 0, numResults = getNumResults(); i < numResults; i++)
+    if (getDimPosition(i) == input)
+      return i;
+  return llvm::None;
+}
+
 /// Folds the results of the application of an affine map on the provided
 /// operands to a constant if possible. Returns false if the folding happens,
 /// true otherwise.
