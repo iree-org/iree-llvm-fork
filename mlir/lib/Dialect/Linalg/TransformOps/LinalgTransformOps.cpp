@@ -1490,8 +1490,7 @@ void transform::TileToForeachThreadOp::build(
     ArrayAttr mapping) {
   SmallVector<int64_t> staticTileSizes;
   SmallVector<Value> dynamicTileSizes;
-  dispatchIndexOpFoldResults(mixedTileSizes, dynamicTileSizes, staticTileSizes,
-                             ShapedType::kDynamic);
+  dispatchIndexOpFoldResults(mixedTileSizes, dynamicTileSizes, staticTileSizes);
   // Call the default builder which sets up the proper operands segment sizes
   // attributes for multiple variadic operands. In the absence of this, horrible
   // bugs ensue.
@@ -1526,7 +1525,7 @@ void transform::TileToForeachThreadOp::build(
   SmallVector<int64_t> staticNumThreads;
   SmallVector<Value> dynamicNumThreads;
   dispatchIndexOpFoldResults(mixedNumThreads, dynamicNumThreads,
-                             staticNumThreads, ShapedType::kDynamic);
+                             staticNumThreads);
   // Call the default builder which sets up the proper operands segment sizes
   // attributes for multiple variadic operands. In the absence of this, horrible
   // bugs ensue.
