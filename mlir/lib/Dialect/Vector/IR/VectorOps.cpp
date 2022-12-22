@@ -1290,7 +1290,7 @@ ExtractFromInsertTransposeChainState::handleInsertOpWithMatchingPos(
   // Case 2.a. early-exit fold.
   res = nextInsertOp.getSource();
   // Case 2.b. if internal transposition is present, canFold will be false.
-  return success();
+  return success(canFold());
 }
 
 /// Case 3: if inserted position is a prefix of extractPosition,
