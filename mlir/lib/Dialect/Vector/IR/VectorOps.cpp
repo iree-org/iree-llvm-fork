@@ -1046,6 +1046,11 @@ OpFoldResult vector::ExtractElementOp::fold(ArrayRef<Attribute> operands) {
   if (auto splat = getVector().getDefiningOp<vector::SplatOp>())
     return splat.getInput();
 
+  // Fold extractelement(broadcast(X)) -> X.
+  if (auto broadcast = getVector().getDefiningOp<vector::BroadcastOp>())
+    if (!broadcast.getSource().getType().isa<VectorType>())
+      return broadcast.getSource();
+
   if (!pos || !src)
     return {};
 
