@@ -444,23 +444,24 @@ static DiagnosedSilenceableFailure rewriteOneForeachThreadToGpuThreads(
 
   // Step 4. Maybe create conditionals to predicate the region.
   Value predicate;
-  for (auto [threadId, blockDim, globalBlockDim] :
-       llvm::zip(threadOps, blockDims, globalBlockDims)) {
-    if (blockDim > globalBlockDim) {
-      return failureHelper(
-          "The requested GPU threads are fewer than the number of loop trip "
-          "counts. Try to tile scf.foreach_thread before mapping or set "
-          "small blockDim.");
-    }
-    if (blockDim == globalBlockDim)
-      continue;
-    Value blockIdx = rewriter.create<arith::ConstantIndexOp>(loc, blockDim);
-    Value tmpPredicate = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::ult, threadId, blockIdx);
-    predicate =
-        predicate ? rewriter.create<arith::AndIOp>(loc, predicate, tmpPredicate)
-                  : tmpPredicate;
-  }
+  // for (auto [threadId, blockDim, globalBlockDim] :
+  //      llvm::zip(threadOps, blockDims, globalBlockDims)) {
+  //   if (blockDim > globalBlockDim) {
+  //     return failureHelper(
+  //         "The requested GPU threads are fewer than the number of loop trip "
+  //         "counts. Try to tile scf.foreach_thread before mapping or set "
+  //         "small blockDim.");
+  //   }
+  //   if (blockDim == globalBlockDim)
+  //     continue;
+  //   Value blockIdx = rewriter.create<arith::ConstantIndexOp>(loc, blockDim);
+  //   Value tmpPredicate = rewriter.create<arith::CmpIOp>(
+  //       loc, arith::CmpIPredicate::ult, threadId, blockIdx);
+  //   predicate =
+  //       predicate ? rewriter.create<arith::AndIOp>(loc, predicate,
+  //       tmpPredicate)
+  //                 : tmpPredicate;
+  // }
 
   // Step 5. Move the body of foreachThreadOp.
   // Erase the terminator first, it will not be used.
