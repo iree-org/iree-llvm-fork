@@ -5455,7 +5455,7 @@ Optional<unsigned> getYieldOpUseOperandNum(Operation *op) {
 
   for (OpOperand &use : op->getUses()) {
     if (isYieldOpUse(use))
-        return use.getOperandNumber();
+      return use.getOperandNumber();
   }
 
   return std::nullopt;
@@ -5502,7 +5502,7 @@ struct FlattenMultiOpMaskOp : public OpRewritePattern<MaskOp> {
       if (auto maskableOp = dyn_cast<MaskableOpInterface>(nestedOp)) {
         // Create a new vector.mask operation for this maskable op using the
         // original mask.
-        auto createRegionMask = [nestedOp](OpBuilder &builder, Location loc) {
+        auto createRegionMask = [](OpBuilder &builder, Operation *nestedOp) {
           Block *insBlock = builder.getInsertionBlock();
           // Create a block, put an op in that block. Look for a utility.
           // Maybe in conversion pattern rewriter. Way to avoid splice.
@@ -5510,17 +5510,20 @@ struct FlattenMultiOpMaskOp : public OpRewritePattern<MaskOp> {
           insBlock->getOperations().splice(
               insBlock->begin(), nestedOp->getBlock()->getOperations(),
               nestedOp);
-          builder.create<vector::YieldOp>(loc, nestedOp->getResults());
+          builder.create<vector::YieldOp>(nestedOp->getLoc(),
+                                          nestedOp->getResults());
         };
 
-        auto newMaskOp = maskableOp->getResults().empty()
-            ? rewriter.create<vector::MaskOp>(maskOp.getLoc(), activeMask,
-                                              createRegionMask)
-            : rewriter.create<vector::MaskOp>(
-                  maskOp.getLoc(), maskableOp->getResultTypes().front(),
-                  activeMask, createRegionMask);
+        auto newMaskOp =
+            maskableOp->getResults().empty()
+                ? rewriter.create<vector::MaskOp>(maskOp.getLoc(), activeMask,
+                                                  maskableOp, createRegionMask)
+                : rewriter.create<vector::MaskOp>(
+                      maskOp.getLoc(), maskableOp->getResultTypes().front(),
+                      activeMask, maskableOp, createRegionMask);
 
-        Operation *newMaskOpTerminator = &newMaskOp.getMaskRegion().front().back();
+        Operation *newMaskOpTerminator =
+            &newMaskOp.getMaskRegion().front().back();
 
         // Replace the original uses of the maskable op with result value of the
         // new vector.mask containing the maskable op.
@@ -5534,7 +5537,8 @@ struct FlattenMultiOpMaskOp : public OpRewritePattern<MaskOp> {
           rewriter.replaceAllUsesWith(maskOp.getResult(0),
                                       newMaskOp.getResult(0));
       } else {
-        // This operation doesn't need mask. We just move it outside the vector.mask.
+        // This operation doesn't need mask. We just move it outside the
+        // vector.mask.
         maskOp->getBlock()->getOperations().splice(
             Block::iterator(maskOp), nestedOp->getBlock()->getOperations(),
             nestedOp);
