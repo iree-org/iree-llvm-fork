@@ -342,6 +342,13 @@ LogicalResult MultiDimReductionOp::verify() {
   return success();
 }
 
+/// Returns the mask type expected by this operation.
+Type MultiDimReductionOp::getExpectedMaskType() {
+  auto vecType = getSourceVectorType();
+  return vecType.cloneWith(std::nullopt,
+                           IntegerType::get(vecType.getContext(), /*width=*/1));
+}
+
 namespace {
 // Only unit dimensions that are being reduced are folded. If the dimension is
 // unit, but not reduced, it is not folded, thereby keeping the output type the
@@ -5271,7 +5278,8 @@ void CreateMaskOp::getCanonicalizationPatterns(RewritePatternSet &results,
 
 void MaskOp::build(
     OpBuilder &builder, OperationState &result, Value mask,
-    function_ref<void(OpBuilder &, Location)> maskRegionBuilder) {
+    Operation *maskableOp,
+    function_ref<void(OpBuilder &, Operation *)> maskRegionBuilder) {
   assert(maskRegionBuilder &&
          "builder callback for 'maskRegion' must be present");
 
@@ -5279,21 +5287,22 @@ void MaskOp::build(
   OpBuilder::InsertionGuard guard(builder);
   Region *maskRegion = result.addRegion();
   builder.createBlock(maskRegion);
-  maskRegionBuilder(builder, result.location);
+  maskRegionBuilder(builder, maskableOp);
 }
 
 void MaskOp::build(
     OpBuilder &builder, OperationState &result, Type resultType, Value mask,
-    function_ref<void(OpBuilder &, Location)> maskRegionBuilder) {
-  build(builder, result, resultType, mask, /*passthru=*/Value(),
+    Operation *maskableOp,
+    function_ref<void(OpBuilder &, Operation *)> maskRegionBuilder) {
+  build(builder, result, resultType, mask, /*passthru=*/Value(), maskableOp,
         maskRegionBuilder);
 }
 
 void MaskOp::build(
     OpBuilder &builder, OperationState &result, Type resultType, Value mask,
-    Value passthru,
-    function_ref<void(OpBuilder &, Location)> maskRegionBuilder) {
-  build(builder, result, mask, maskRegionBuilder);
+    Value passthru, Operation *maskableOp,
+    function_ref<void(OpBuilder &, Operation *)> maskRegionBuilder) {
+  build(builder, result, mask, maskableOp, maskRegionBuilder);
   if (passthru)
     result.addOperands(passthru);
   result.addTypes(resultType);
