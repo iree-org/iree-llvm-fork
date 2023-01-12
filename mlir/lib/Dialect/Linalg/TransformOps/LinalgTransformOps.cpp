@@ -27,6 +27,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/TilingInterface.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Debug.h"
@@ -1739,8 +1740,12 @@ void transform::TileOp::build(OpBuilder &builder, OperationState &result,
   MLIRContext *ctx = builder.getContext();
   auto operationType = pdl::OperationType::get(ctx);
   auto staticTileSizesAttr = builder.getDenseI64ArrayAttr(staticTileSizes);
+  int64_t countLoops =
+      llvm::count_if(staticTileSizes, [](int64_t ts) { return ts != 0; });
+  countLoops += dynamicTileSizes.size();
+  int64_t countResults = 1 + countLoops;
   build(builder, result,
-        /*resultTypes=*/TypeRange{operationType, operationType},
+        /*resultTypes=*/SmallVector<Type>(countResults, operationType),
         /*target=*/target,
         /*dynamic_sizes=*/dynamicTileSizes,
         /*static_sizes=*/staticTileSizesAttr,
