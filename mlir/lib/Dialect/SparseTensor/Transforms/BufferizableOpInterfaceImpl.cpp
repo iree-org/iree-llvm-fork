@@ -83,8 +83,8 @@ struct LoadOpInterface
 struct NewOpInterface
     : public BufferizableOpInterface::ExternalModel<NewOpInterface,
                                                     sparse_tensor::NewOp> {
-  bool isMemoryWrite(Operation *op, OpResult opResult,
-                     const AnalysisState &state) const {
+  bool resultBufferizesToMemoryWrite(Operation *op, OpResult opResult,
+                                     const AnalysisState &state) const {
     // NewOps allocate but do not write.
     return false;
   }
