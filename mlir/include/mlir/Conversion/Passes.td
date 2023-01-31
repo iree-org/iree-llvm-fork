@@ -552,6 +552,17 @@ def ConvertMathToFuncs : Pass<"convert-math-to-funcs", "ModuleOp"> {
 }
 
 //===----------------------------------------------------------------------===//
+// MemRefToLinalg
+//===----------------------------------------------------------------------===//
+
+def ConvertMemrefToLinalg : Pass<"convert-memref-to-linalg", "ModuleOp"> {
+  let summary = "Convert operations from the MemRef dialect to the linalg "
+                "dialect";
+  let constructor = "mlir::createConvertMemRefToLinalgPass()";
+  let dependentDialects = ["linalg::LinalgDialect"];
+}
+
+//===----------------------------------------------------------------------===//
 // MemRefToLLVM
 //===----------------------------------------------------------------------===//
 
