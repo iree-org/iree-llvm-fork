@@ -32,7 +32,7 @@ def CUDNN_Dialect : Dialect {
   }];
 
   let useDefaultTypePrinterParser = 1;
-  let useFoldAPI = kEmitFoldAdaptorFolder;
+//  let useFoldAPI = kEmitFoldAdaptorFolder;
 }
 
 #endif // CUDNN
