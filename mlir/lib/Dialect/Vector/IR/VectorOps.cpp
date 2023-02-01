@@ -5558,6 +5558,11 @@ struct FlattenMultiOpMaskOp : public OpRewritePattern<MaskOp> {
 
 } // namespace
 
+void mlir::vector::populateVectorMaskFlatteningPatterns(
+    RewritePatternSet &patterns) {
+  patterns.add<FlattenMultiOpMaskOp>(patterns.getContext());
+}
+
 // MaskingOpInterface definitions.
 
 /// Returns the operation masked by this 'vector.mask'.

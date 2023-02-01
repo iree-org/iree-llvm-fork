@@ -147,6 +147,10 @@ void populateVectorShapeCastLoweringPatterns(RewritePatternSet &patterns,
 void populateScalarVectorTransferLoweringPatterns(RewritePatternSet &patterns,
                                                   PatternBenefit benefit = 1);
 
+/// Collects patterns to split up vector.mask operations with several
+/// operations in them.
+void populateVectorMaskFlatteningPatterns(RewritePatternSet &patterns);
+
 /// Returns the integer type required for subscripts in the vector dialect.
 IntegerType getVectorSubscriptType(Builder &builder);
 
