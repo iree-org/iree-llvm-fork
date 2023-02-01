@@ -5473,7 +5473,7 @@ struct FlattenMultiOpMaskOp : public OpRewritePattern<MaskOp> {
                                 PatternRewriter &rewriter) const override {
     Block &block = maskOp.getMaskRegion().getBlocks().front();
     if (block.getOperations().size() <= 2)
-      return success();
+      return failure();
 
     PatternRewriter::InsertionGuard guard(rewriter);
     rewriter.setInsertionPoint(maskOp);
