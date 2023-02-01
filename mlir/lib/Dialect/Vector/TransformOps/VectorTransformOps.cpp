@@ -113,6 +113,8 @@ DiagnosedSilenceableFailure transform::LowerVectorsOp::apply(
       x86vector::avx2::populateSpecializedTransposeLoweringPatterns(
           patterns, avx2LoweringOptions, /*benefit=*/10);
 
+    vector::populateVectorMaskFlatteningPatterns(patterns);
+
     // Apply everything.
     if (failed(applyPatternsAndFoldGreedily(target, std::move(patterns))))
       return DiagnosedSilenceableFailure::definiteFailure();
