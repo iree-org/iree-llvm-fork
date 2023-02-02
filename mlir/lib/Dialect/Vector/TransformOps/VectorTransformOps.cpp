@@ -14,6 +14,7 @@
 #include "mlir/Dialect/Transform/IR/TransformDialect.h"
 #include "mlir/Dialect/Transform/IR/TransformInterfaces.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
+#include "mlir/Dialect/Vector/Transforms/Passes.h"
 #include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
 #include "mlir/Dialect/X86Vector/Transforms.h"
 #include "mlir/Parser/Parser.h"
@@ -114,6 +115,7 @@ DiagnosedSilenceableFailure transform::LowerVectorsOp::apply(
           patterns, avx2LoweringOptions, /*benefit=*/10);
 
     vector::populateVectorMaskFlatteningPatterns(patterns);
+    vector::populateVectorMaskLoweringPatternsForSideEffectingOps(patterns);
 
     // Apply everything.
     if (failed(applyPatternsAndFoldGreedily(target, std::move(patterns))))
