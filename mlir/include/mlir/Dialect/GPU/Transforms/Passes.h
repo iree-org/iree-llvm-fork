@@ -49,6 +49,8 @@ std::unique_ptr<OperationPass<func::FuncOp>> createGpuAsyncRegionPass();
 /// mapped to sequential loops.
 std::unique_ptr<OperationPass<func::FuncOp>> createGpuMapParallelLoopsPass();
 
+std::unique_ptr<OperationPass<func::FuncOp>> createGpuTransformAllocPass();
+
 /// Collect a set of patterns to rewrite all-reduce ops within the GPU dialect.
 void populateGpuAllReducePatterns(RewritePatternSet &patterns);
 

@@ -46,6 +46,7 @@ add_mlir_dialect_library(MLIRGPUOps
 add_mlir_dialect_library(MLIRGPUTransforms
   Transforms/AllReduceLowering.cpp
   Transforms/AsyncRegionRewriter.cpp
+  Transforms/ConvertAlloc.cpp
   Transforms/KernelOutlining.cpp
   Transforms/MemoryPromotion.cpp
   Transforms/ParallelLoopMapper.cpp

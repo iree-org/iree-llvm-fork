@@ -37,4 +37,12 @@ def GpuMapParallelLoopsPass
   let dependentDialects = ["mlir::gpu::GPUDialect"];
 }
 
+def GpuTransformAllocPass
+    : Pass<"gpu-transform-alloc", "mlir::func::FuncOp"> {
+  let summary = "Convert alloc into gpu alloc or register gpu accessible";
+  let constructor = "mlir::createGpuTransformAllocPass()";
+  let description = "Replace allocations by gpu allocations or register them for ";
+  let dependentDialects = ["mlir::gpu::GPUDialect", "mlir::memref::MemRefDialect"];
+}
+
 #endif // MLIR_DIALECT_GPU_PASSES
