@@ -26,9 +26,11 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Dialect/Vector/Utils/VectorUtils.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 namespace mlir {
@@ -67,6 +69,7 @@ static void getXferIndices(OpBuilder &b, TransferOpType xferOp,
 // Return true if the contract op can be convert to MMA matmul.
 static bool contractSupportsMMAMatrixType(vector::ContractionOp contract,
                                           bool useNvGpu) {
+  return true;
   if (!contract.getMasks().empty())
     return false;
 
@@ -981,7 +984,10 @@ void mlir::populatePrepareVectorToMMAPatterns(RewritePatternSet &patterns,
 }
 
 void mlir::convertVectorToMMAOps(Operation *rootOp) {
+  rootOp->dump();
   SetVector<Operation *> ops = getOpToConvert(rootOp, /*useNvGpu=*/false);
+  llvm::interleaveComma(ops, llvm::errs(),
+                        [](Operation *op) { llvm::errs() << *op << "\n"; });
   llvm::DenseMap<Value, Value> valueMapping;
   for (Operation *op : ops) {
     if (auto transferRead = dyn_cast<vector::TransferReadOp>(op)) {

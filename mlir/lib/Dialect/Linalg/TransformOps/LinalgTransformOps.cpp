@@ -1393,7 +1393,9 @@ packGemmGreedily(RewriterBase &rewriter, LinalgOp linalgOp,
   LLVM_DEBUG(DBGSNL(); DBGSNL(); DBGSNL();
              DBGS() << "Start packing generic op greedily with (m@" << mPos
                     << ", n@" << nPos << ", k@" << kPos << "): " << linalgOp
-                    << "\n";);
+                    << "\n";
+             llvm::interleaveComma(packedSizes, DBGS() << "and packed sizes: ");
+             DBGSNL(););
 
   // 2.a. Rewrite as a generic.
   auto genericOp = dyn_cast<GenericOp>(linalgOp.getOperation());
@@ -1403,6 +1405,7 @@ packGemmGreedily(RewriterBase &rewriter, LinalgOp linalgOp,
     assert(succeeded(generalizeResult) && "unexpected failure generalizing op");
     genericOp = *generalizeResult;
   }
+  LLVM_DEBUG(DBGS() << "Generalized Op to pack: " << genericOp << "\n";);
 
   // 2.b. Interchange to move the dimensions (k, m, n) as most-minor iterators.
   // Note that this only normalized the iteration order and does not change the
@@ -1416,7 +1419,8 @@ packGemmGreedily(RewriterBase &rewriter, LinalgOp linalgOp,
       interchangeGenericOp(rewriter, genericOp, unsignedPerm);
   assert(succeeded(interchangeResult) && "unexpected failure interchanging op");
   genericOp = *interchangeResult;
-  LLVM_DEBUG(DBGS() << "Generalized Op to pack: " << genericOp << "\n";);
+  LLVM_DEBUG(DBGS() << "Generalized interchanged Op to pack: " << genericOp
+                    << "\n";);
 
   // At this point, the op iterators are normalized to {leading, k, m, n}.
   // The layouts induced by packing will always be:

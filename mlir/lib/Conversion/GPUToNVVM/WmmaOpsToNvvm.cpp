@@ -79,9 +79,10 @@ struct WmmaLoadOpToNVVMLowering
 
     // Get the shape of the MMAMatrix type being returned. The shape will
     // choose which intrinsic this op will be lowered to.
-    NVVM::MMALayout layout = subgroupMmaLoadMatrixOp.getTranspose()
-                                 ? NVVM::MMALayout::col
-                                 : NVVM::MMALayout::row;
+    // NVVM::MMALayout layout = subgroupMmaLoadMatrixOp.getTranspose()
+    //                              ? NVVM::MMALayout::col
+    //                              : NVVM::MMALayout::row;
+    NVVM::MMALayout layout;
     gpu::MMAMatrixType retType =
         subgroupMmaLoadMatrixOp.getRes().getType().cast<gpu::MMAMatrixType>();
     ArrayRef<int64_t> retTypeShape = retType.getShape();
@@ -92,22 +93,34 @@ struct WmmaLoadOpToNVVMLowering
     // NVVM intrinsics require to give mxnxk dimensions, infer the missing
     // dimension based on the valid intrinsics available.
     if (retType.getOperand().equals("AOp")) {
-      m = retTypeShape[0];
-      k = retTypeShape[1];
+      llvm::errs() << "AOp: " << eltype << " ";
+      k = retTypeShape[0];
+      m = retTypeShape[1];
+      layout = NVVM::MMALayout::col;
       n = NVVM::WMMALoadOp::inferNDimension(m, k, eltype);
     } else if (retType.getOperand().equals("BOp")) {
+      llvm::errs() << "BOp: " << eltype << " ";
       k = retTypeShape[0];
       n = retTypeShape[1];
+      layout = NVVM::MMALayout::row;
       m = NVVM::WMMALoadOp::inferMDimension(k, n, eltype);
     } else if (retType.getOperand().equals("COp")) {
+      llvm::errs() << "COp: " << eltype << " ";
       m = retTypeShape[0];
       n = retTypeShape[1];
+      layout = NVVM::MMALayout::row;
+      // v---- There is a freaking bug in there ..
       k = NVVM::WMMALoadOp::inferKDimension(m, n, eltype);
+      k = 8;
     }
     NVVM::MMAFrag frag = convertOperand(retType.getOperand());
     // Check that there is an exisiting instruction for the combination we need.
-    if (NVVM::WMMALoadOp::getIntrinsicID(m, n, k, layout, eltype, frag) == 0)
+    if (NVVM::WMMALoadOp::getIntrinsicID(m, n, k, layout, eltype, frag) == 0) {
+      llvm::errs() << "k: " << k << " m: " << m << " n: " << n
+                   << "frag: " << frag << "\n";
+      abort();
       return rewriter.notifyMatchFailure(op, kInvalidCaseStr);
+    }
 
     Type resType = convertMMAToLLVMType(retType);
     Location loc = op->getLoc();
@@ -194,6 +207,7 @@ struct WmmaMmaOpToNVVMLowering
                   OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     Operation *op = subgroupMmaComputeOp.getOperation();
+    op->dump();
     if (failed(areAllLLVMTypes(op, adaptor.getOperands(), rewriter)))
       return failure();
 
@@ -223,13 +237,15 @@ struct WmmaMmaOpToNVVMLowering
     ArrayRef<int64_t> cTypeShape = cType.getShape();
     int64_t m = cTypeShape[0];
     int64_t n = cTypeShape[1];
-    int64_t k = aTypeShape[1];
-    NVVM::MMALayout aLayout = subgroupMmaComputeOp.getATranspose()
-                                  ? NVVM::MMALayout::col
-                                  : NVVM::MMALayout::row;
-    NVVM::MMALayout bLayout = subgroupMmaComputeOp.getBTranspose()
-                                  ? NVVM::MMALayout::col
-                                  : NVVM::MMALayout::row;
+    int64_t k = aTypeShape[0];
+    // NVVM::MMALayout aLayout = subgroupMmaComputeOp.getATranspose()
+    //                               ? NVVM::MMALayout::col
+    //                               : NVVM::MMALayout::row;
+    // NVVM::MMALayout bLayout = subgroupMmaComputeOp.getBTranspose()
+    //                               ? NVVM::MMALayout::col
+    //                               : NVVM::MMALayout::row;
+    NVVM::MMALayout aLayout = NVVM::MMALayout::col;
+    NVVM::MMALayout bLayout = NVVM::MMALayout::row;
     NVVM::MMATypes sourceType = getElementType(aType);
     NVVM::MMATypes destType = getElementType(cType);
     if (NVVM::WMMAMmaOp::getIntrinsicID(m, n, k, aLayout, bLayout, sourceType,

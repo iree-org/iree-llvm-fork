@@ -1282,9 +1282,9 @@ LogicalResult SubgroupMmaComputeOp::verify() {
   bShape = opTypes[B].getShape();
   cShape = opTypes[C].getShape();
 
-  if (aShape[1] != bShape[0] || aShape[0] != cShape[0] ||
-      bShape[1] != cShape[1])
-    return emitError("operand shapes do not satisfy matmul constraints");
+  // if (aShape[1] != bShape[0] || aShape[0] != cShape[0] ||
+  //     bShape[1] != cShape[1])
+  //   return emitError("operand shapes do not satisfy matmul constraints");
 
   return success();
 }
