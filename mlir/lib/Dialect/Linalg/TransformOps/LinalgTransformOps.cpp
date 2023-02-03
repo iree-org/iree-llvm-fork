@@ -1647,7 +1647,7 @@ transform::PadOp::applyToOne(LinalgOp target,
                              transform::TransformState &state) {
   // Convert the integer packing flags to booleans.
   SmallVector<bool> packPaddings;
-  for (int64_t packPadding : extractFromI64ArrayAttr(getPackPaddings()))
+  for (int64_t packPadding : getPackPaddings())
     packPaddings.push_back(static_cast<bool>(packPadding));
 
   // Convert the padding values to attributes.
@@ -1682,19 +1682,11 @@ transform::PadOp::applyToOne(LinalgOp target,
     paddingValues.push_back(attr);
   }
 
-  // Extract the transpose vectors.
-  SmallVector<SmallVector<int64_t>> transposePaddings;
-  for (Attribute transposeVector : getTransposePaddings().cast<ArrayAttr>())
-    transposePaddings.push_back(
-        extractFromI64ArrayAttr(transposeVector.cast<ArrayAttr>()));
-
   LinalgPaddingOptions paddingOptions;
   paddingOptions.setPaddingValues(paddingValues);
-  paddingOptions.setPaddingDimensions(
-      extractFromI64ArrayAttr(getPaddingDimensions()));
+  paddingOptions.setPaddingDimensions(getPaddingDimensions());
   paddingOptions.setPackPaddings(packPaddings);
-  paddingOptions.setHoistPaddings(extractFromI64ArrayAttr(getHoistPaddings()));
-  paddingOptions.setTransposePaddings(transposePaddings);
+  paddingOptions.setHoistPaddings(getHoistPaddings());
 
   FailureOr<LinalgOp> result =
       tryApply<LinalgPaddingPattern>(target, paddingOptions);
@@ -1707,9 +1699,7 @@ transform::PadOp::applyToOne(LinalgOp target,
 }
 
 LogicalResult transform::PadOp::verify() {
-  SmallVector<int64_t> packPaddings =
-      extractFromI64ArrayAttr(getPackPaddings());
-  if (any_of(packPaddings, [](int64_t packPadding) {
+  if (any_of(getPackPaddings(), [](int64_t packPadding) {
         return packPadding != 0 && packPadding != 1;
       })) {
     return emitOpError()
@@ -1717,35 +1707,20 @@ LogicalResult transform::PadOp::verify() {
            << getPackPaddings();
   }
 
-  SmallVector<int64_t> paddingDimensions =
-      extractFromI64ArrayAttr(getPaddingDimensions());
-  if (any_of(paddingDimensions,
+  if (any_of(getPaddingDimensions(),
              [](int64_t paddingDimension) { return paddingDimension < 0; })) {
     return emitOpError() << "expects padding_dimensions to contain positive "
                             "integers, found "
                          << getPaddingDimensions();
   }
 
-  SmallVector<int64_t> hoistPaddings =
-      extractFromI64ArrayAttr(getHoistPaddings());
-  if (any_of(hoistPaddings,
+  if (any_of(getHoistPaddings(),
              [](int64_t hoistPadding) { return hoistPadding < 0; })) {
     return emitOpError()
            << "expects hoist_paddings to contain positive integers, found "
            << getHoistPaddings();
   }
 
-  ArrayAttr transposes = getTransposePaddings();
-  for (Attribute attr : transposes) {
-    SmallVector<int64_t> transpose = extractFromI64ArrayAttr(attr);
-    auto sequence = llvm::to_vector(llvm::seq<int64_t>(0, transpose.size()));
-    if (!std::is_permutation(sequence.begin(), sequence.end(),
-                             transpose.begin(), transpose.end())) {
-      return emitOpError()
-             << "expects transpose_paddings to be a permutation, found "
-             << attr;
-    }
-  }
   return success();
 }
 

@@ -695,12 +695,9 @@ def PadOp : Op<Transform_Dialect, "structured.pad",
   let arguments =
     (ins PDL_Operation:$target,
          DefaultValuedAttr<ArrayAttr, "{}">:$padding_values,
-         DefaultValuedAttr<I64ArrayAttr, "{}">:$padding_dimensions,
-         DefaultValuedAttr<I64ArrayAttr, "{}">:$pack_paddings,
-         DefaultValuedAttr<I64ArrayAttr, "{}">:$hoist_paddings,
-         DefaultValuedAttr<
-          TypedArrayAttrBase<I64ArrayAttr, "array of arrays of i64">,
-          "{}">:$transpose_paddings);
+         DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$padding_dimensions,
+         DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$pack_paddings,
+         DefaultValuedAttr<DenseI64ArrayAttr, "{}">:$hoist_paddings);
   let results = (outs PDL_Operation:$transformed);
 
   let assemblyFormat = "$target attr-dict";
