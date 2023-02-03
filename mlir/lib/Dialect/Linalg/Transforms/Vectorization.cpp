@@ -959,6 +959,10 @@ static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
   // TODO: Masking only supports dynamic generic ops for now.
   if (!isa<linalg::GenericOp>(op))
     return failure();
+  
+  // TODO: Index vectorization assumes static shape.
+  if(op.hasIndexSemantics())
+    return failure();
 
   // TODO: 0-d vectors are not supported yet.
   if (llvm::any_of(op.getIndexingMapsArray(), [](AffineMap map) {
