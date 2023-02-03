@@ -502,6 +502,7 @@ cc_library(
         ":BinaryFormat",
         ":DebugInfoCodeView",
         ":Support",
+        ":TargetParser",
         ":config",
         ":ir_headers",
     ],
