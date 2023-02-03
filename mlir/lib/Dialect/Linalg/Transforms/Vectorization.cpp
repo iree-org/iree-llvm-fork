@@ -1063,7 +1063,8 @@ static void convertAffineApply(RewriterBase &rewriter, LinalgOp linalgOp) {
     rewriter.setInsertionPoint(op);
     auto expanded =
         expandAffineExpr(rewriter, op->getLoc(), op.getAffineMap().getResult(0),
-                         op.getOperands(), ValueRange{});
+                         op.getOperands().take_front(op.getAffineMap().getNumDims()), 
+                         op.getOperands().take_back(op.getAffineMap().getNumSymbols()));
     rewriter.replaceOp(op, expanded);
   }
 }
