@@ -959,9 +959,9 @@ static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
   // TODO: Masking only supports dynamic generic ops for now.
   if (!isa<linalg::GenericOp>(op))
     return failure();
-  
+
   // TODO: Index vectorization assumes static shape.
-  if(op.hasIndexSemantics())
+  if (op.hasIndexSemantics())
     return failure();
 
   // TODO: 0-d vectors are not supported yet.
@@ -1056,15 +1056,15 @@ mlir::linalg::vectorizeLinalgOpPrecondition(LinalgOp linalgOp,
 
 /// Converts affine.apply Ops to arithmetic operations.
 static void convertAffineApply(RewriterBase &rewriter, LinalgOp linalgOp) {
+  auto &newIP = linalgOp.getBlock()->front();
   OpBuilder::InsertionGuard g(rewriter);
+  rewriter.setInsertionPointAfter(&newIP);
   auto toReplace = linalgOp.getBlock()->getOps<AffineApplyOp>();
 
   for (auto op : make_early_inc_range(toReplace)) {
-    rewriter.setInsertionPoint(op);
     auto expanded =
         expandAffineExpr(rewriter, op->getLoc(), op.getAffineMap().getResult(0),
-                         op.getOperands().take_front(op.getAffineMap().getNumDims()), 
-                         op.getOperands().take_back(op.getAffineMap().getNumSymbols()));
+                         op.getOperands(), ValueRange{});
     rewriter.replaceOp(op, expanded);
   }
 }
