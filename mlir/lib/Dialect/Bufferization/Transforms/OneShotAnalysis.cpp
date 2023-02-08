@@ -128,7 +128,53 @@ OneShotAnalysisState::OneShotAnalysisState(
   });
 }
 
-void OneShotAnalysisState::applyOnEquivalenceClass(
+/// Add a new entry for `v` in the `aliasInfo` and `equivalentInfo`. In the
+/// beginning the alias and equivalence sets only contain `v` itself.
+void BufferizationAliasInfo::createAliasInfoEntry(Value v) {
+  aliasInfo.insert(v);
+  equivalentInfo.insert(v);
+}
+
+/// Insert an info entry for `newValue` and merge its alias set with that of
+/// `alias`.
+void BufferizationAliasInfo::insertNewBufferAlias(Value newValue, Value alias) {
+  createAliasInfoEntry(newValue);
+  aliasInfo.unionSets(newValue, alias);
+}
+
+/// Insert an info entry for `newValue` and merge its alias set with that of
+/// `alias`. Additionally, merge their equivalence classes.
+void BufferizationAliasInfo::insertNewBufferEquivalence(Value newValue,
+                                                        Value alias) {
+  insertNewBufferAlias(newValue, alias);
+  equivalentInfo.unionSets(newValue, alias);
+}
+
+/// Return `true` if a value was marked as in-place bufferized.
+bool BufferizationAliasInfo::isInPlace(OpOperand &operand) const {
+  return inplaceBufferized.contains(&operand);
+}
+
+/// Set the inPlace bufferization spec to true.
+void BufferizationAliasInfo::bufferizeInPlace(OpOperand &operand,
+                                              AnalysisState &state) {
+  if (inplaceBufferized.contains(&operand))
+    return;
+  markInPlace(operand);
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand))
+    aliasInfo.unionSets(alias.opResult, operand.get());
+  ++statNumTensorInPlace;
+}
+
+/// Set the inPlace bufferization spec to false.
+void BufferizationAliasInfo::bufferizeOutOfPlace(OpOperand &operand) {
+  assert(!inplaceBufferized.contains(&operand) &&
+         "OpOperand was already decided to bufferize inplace");
+  ++statNumTensorOutOfPlace;
+}
+
+/// Apply `fun` to all the members of the equivalence class of `v`.
+void BufferizationAliasInfo::applyOnEquivalenceClass(
     Value v, function_ref<void(Value)> fun) const {
   auto leaderIt = equivalentInfo.findLeader(v);
   for (auto mit = leaderIt, meit = equivalentInfo.member_end(); mit != meit;
@@ -698,11 +744,11 @@ static bool wouldCreateReadAfterWriteInterference(
     OneShotAnalysisState &state, bool checkConsistencyOnly = false) {
   // Collect reads and writes of all aliases of OpOperand and OpResult.
   DenseSet<OpOperand *> usesRead, usesWrite;
-  getAliasingReads(usesRead, operand.get(), state);
-  getAliasingInplaceWrites(usesWrite, operand.get(), state);
+  getAliasingReads(usesRead, operand.get(), aliasInfo, state);
+  getAliasingInplaceWrites(usesWrite, operand.get(), aliasInfo, state);
   for (AliasingOpResult alias : state.getAliasingOpResults(operand)) {
-    getAliasingReads(usesRead, alias.opResult, state);
-    getAliasingInplaceWrites(usesWrite, alias.opResult, state);
+    getAliasingReads(usesRead, alias.opResult, aliasInfo, state);
+    getAliasingInplaceWrites(usesWrite, alias.opResult, aliasInfo, state);
   }
   if (!checkConsistencyOnly && state.bufferizesToMemoryWrite(operand))
     usesWrite.insert(&operand);
@@ -727,14 +773,52 @@ static void annotateNonWritableTensor(Value value) {
   }
 }
 
+/// Check the reverse SSA use-def chain (following aliasing OpOperands) for
+/// non-writable tensor values. Stop searching when an out-of-place bufferized
+/// OpOperand was found (or when the OpOperand was not bufferized yet).
+/// `currentOpOperand` is assumed to be in-place, even if that decision was not
+/// materialized in `aliasInfo` yet.
+static bool
+hasPrecedingAliasingNonWritableTensor(Value value, OpOperand *currentOpOperand,
+                                      const BufferizationAliasInfo &aliasInfo,
+                                      const OneShotAnalysisState &state) {
+  SmallVector<Value> worklist;
+  worklist.push_back(value);
+  while (!worklist.empty()) {
+    Value nextVal = worklist.pop_back_val();
+    if (!state.isWritable(nextVal)) {
+      if (state.getOptions().printConflicts)
+        annotateNonWritableTensor(nextVal);
+      return true;
+    }
+
+    // If `nextVal` is not a BlockArgument: End of use-def chain reached.
+    auto opResult = nextVal.dyn_cast<OpResult>();
+    if (!opResult)
+      continue;
+
+    // Follow reverse SSA use-def chain.
+    for (AliasingOpOperand alias : state.getAliasingOpOperands(opResult))
+      if (aliasInfo.isInPlace(*alias.opOperand) ||
+          currentOpOperand == alias.opOperand)
+        worklist.push_back(alias.opOperand->get());
+  }
+  return false;
+}
+
 /// Return true if bufferizing `operand` inplace would create a write to a
 /// non-writable buffer.
-static bool
-wouldCreateWriteToNonWritableBuffer(OpOperand &operand,
-                                    OneShotAnalysisState &state,
-                                    bool checkConsistencyOnly = false) {
-  bool foundWrite =
-      !checkConsistencyOnly && state.bufferizesToMemoryWrite(operand);
+static bool wouldCreateWriteToNonWritableBuffer(
+    OpOperand &operand, const BufferizationAliasInfo &aliasInfo,
+    OneShotAnalysisState &state, bool checkConsistencyOnly = false) {
+  // Collect writes of all aliases of OpOperand and OpResult.
+  DenseSet<OpOperand *> usesWrite;
+  getAliasingInplaceWrites(usesWrite, operand.get(), aliasInfo, state);
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand)) {
+    getAliasingInplaceWrites(usesWrite, alias.opResult, aliasInfo, state);
+  }
+  if (!checkConsistencyOnly && state.bufferizesToMemoryWrite(operand))
+    usesWrite.insert(&operand);
 
   if (!foundWrite) {
     // Collect writes of all aliases of OpOperand and OpResult.
@@ -827,7 +911,8 @@ static bool hasTensorSemantics(Operation *op) {
 
 /// Analyze equivalence of tied OpResult/OpOperand pairs of the given ops.
 static void equivalenceAnalysis(SmallVector<Operation *> &ops,
-                                OneShotAnalysisState &state) {
+                                BufferizationAliasInfo &aliasInfo,
+                                AnalysisState &state) {
   for (Operation *op : ops) {
     if (auto bufferizableOp = state.getOptions().dynCastBufferizableOp(op)) {
       for (OpResult opResult : op->getOpResults()) {
@@ -835,7 +920,7 @@ static void equivalenceAnalysis(SmallVector<Operation *> &ops,
           continue;
         AliasingOpOperandList aliases = state.getAliasingOpOperands(opResult);
         if (aliases.getNumAliases() == 0)
-          // Nothing to do if there are no aliasing OpOperands.
+          // Nothing to do if there are no aliasing OpOpeands.
           continue;
 
         Value firstOperand = aliases.begin()->opOperand->get();
@@ -847,7 +932,7 @@ static void equivalenceAnalysis(SmallVector<Operation *> &ops,
           if (isEquiv && isInPlace && alias.isDefinite) {
             // Found a definite, equivalent alias. Merge equivalence sets.
             // There can only be one definite alias, so we can stop here.
-            state.unionEquivalenceClasses(opResult, operand);
+            aliasInfo.unionEquivalenceClasses(opResult, operand);
             allEquivalent = false;
             break;
           }
@@ -858,17 +943,9 @@ static void equivalenceAnalysis(SmallVector<Operation *> &ops,
         }
 
         // If all "maybe" aliases are equivalent and the OpResult is not a new
-        // allocation, it is a definite, equivalent alias. E.g.:
-        //
-        // aliasingOpOperands(%r) = {(%t0, EQUIV, MAYBE), (%t1, EQUIV, MAYBE)}
-        // aliasingOpResults(%t0) = {(%r, EQUIV, MAYBE)}
-        // aliasingOpResults(%t1) = {(%r, EQUIV, MAYBE)}
-        // %r = arith.select %c, %t0, %t1 : tensor<?xf32>
-        //
-        // If %t0 and %t1 are equivalent, it is safe to union the equivalence
-        // classes of %r, %t0 and %t1.
+        // allocation, it is a definite, equivalent alias.
         if (allEquivalent && !bufferizableOp.bufferizesToAllocation(opResult))
-          state.unionEquivalenceClasses(opResult, firstOperand);
+          aliasInfo.unionEquivalenceClasses(opResult, firstOperand);
       }
     }
   }

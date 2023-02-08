@@ -143,37 +143,6 @@ struct PackOpInterface
     // ones when packing into a COO format.
     return {{op->getOpResult(0), BufferRelation::Equivalent}};
   }
-
-  BufferRelation bufferRelation(Operation *oo, OpResult opResult,
-                                const AnalysisState &state) const {
-    return BufferRelation::Unknown;
-  }
-};
-
-struct UnpackOpInterface
-    : public BufferizableOpInterface::ExternalModel<UnpackOpInterface,
-                                                    sparse_tensor::UnpackOp> {
-  bool bufferizesToAllocation(Operation *op, OpResult opResult) const {
-    // Similar to InsertOp, reallocation is not considered to allocate a new
-    // piece of memory.
-    return false;
-  }
-
-  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
-                              const AnalysisState &state) const {
-    return true;
-  }
-
-  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
-                               const AnalysisState &state) const {
-    return false;
-  }
-
-  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
-                                            const AnalysisState &state) const {
-    // Conceptually, UnpackOp equals to a list of toIndices/toValueOp
-    return {};
-  }
 };
 
 struct InsertOpInterface
