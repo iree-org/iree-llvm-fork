@@ -99,6 +99,15 @@ findValidInsertionPoint(Operation *emptyTensorOp,
   return nullptr;
 }
 
+namespace {
+/// A replacement for a tensor.empty op.
+struct EmptyTensorReplacement {
+  OpOperand *operand;
+  SmallVector<Value> neededValues;
+  bool isEquivalent;
+};
+} // namespace
+
 /// Try to eliminate tensor::EmptyOps inside `op`. A tensor::EmptyOp is replaced
 /// with the result of `rewriteFunc` if it is anchored on a matching
 /// OpOperand. "Anchored" means that there is a path on the reverse SSA use-def
@@ -108,8 +117,9 @@ LogicalResult mlir::bufferization::eliminateEmptyTensors(
     RewriterBase &rewriter, Operation *op, AnalysisState &state,
     AnchorMatchFn anchorMatchFunc, RewriteFn rewriteFunc) {
   OpBuilder::InsertionGuard g(rewriter);
+  DenseMap<Operation *, EmptyTensorReplacement> emptyTensors;
 
-  WalkResult status = op->walk([&](Operation *op) {
+  op->walk([&](Operation *op) {
     for (OpOperand &operand : op->getOpOperands()) {
       // Skip operands that do not bufferize inplace.
       if (!state.isInPlace(operand))
@@ -119,47 +129,64 @@ LogicalResult mlir::bufferization::eliminateEmptyTensors(
       // Is this a matching OpOperand?
       if (!anchorMatchFunc(operand, neededValues))
         continue;
-      SetVector<Value> maybeEmptyTensor = state.findValueInReverseUseDefChain(
+      SetVector<Value> maybeEmptyTensors = state.findValueInReverseUseDefChain(
           operand.get(), /*condition=*/[&](Value val) { return false; },
           /*followEquivalentOnly=*/true);
 
-      // Replace only if the reverse use-def chain ends at exactly one
-      // tensor::EmptyOp.
-      if (maybeEmptyTensor.size() != 1 ||
-          !maybeEmptyTensor.front().getDefiningOp<tensor::EmptyOp>())
-        continue;
-      Value emptyTensor = maybeEmptyTensor.front();
+      for (Value v : maybeEmptyTensors) {
+        // Replace only if the reverse use-def chain ends at exactly one
+        // tensor::EmptyOp.
+        auto emptyTensor = v.getDefiningOp<tensor::EmptyOp>();
+        if (!emptyTensor)
+          continue;
 
-      // Replace only if the types match.
-      // TODO: This could be extended to support IR such as:
-      // %0 = tensor.empty() : tensor<128xf32>
-      // %1 = "some_op"(%0) : (tensor<128xf32>) -> (tensor<128xf32>)
-      // %2 = tensor.expand_shape %1 ...
-      // %3 = tensor.insert_slice %2 into ...
-      if (emptyTensor.getType() != operand.get().getType())
-        continue;
+        // Replace only if the types match.
+        // TODO: This could be extended to support IR such as:
+        // %0 = tensor.empty() : tensor<128xf32>
+        // %1 = "some_op"(%0) : (tensor<128xf32>) -> (tensor<128xf32>)
+        // %2 = tensor.expand_shape %1 ...
+        // %3 = tensor.insert_slice %2 into ...
+        if (v.getType() != operand.get().getType())
+          continue;
 
-      // Find a suitable insertion point.
-      Operation *insertionPoint =
-          findValidInsertionPoint(emptyTensor.getDefiningOp(), neededValues);
-      if (!insertionPoint)
-        continue;
+        // Check if there is already a good replacement for this op.
+        auto it = emptyTensors.find(emptyTensor.getOperation());
+        if (it != emptyTensors.end() && it->second.isEquivalent)
+          continue;
 
-      // Create a replacement for the tensor::EmptyOp.
-      rewriter.setInsertionPoint(insertionPoint);
-      Value replacement = rewriteFunc(rewriter, emptyTensor.getLoc(), operand);
-      if (!replacement)
-        continue;
+        // Find a suitable insertion point.
+        Operation *insertionPoint =
+            findValidInsertionPoint(emptyTensor.getOperation(), neededValues);
+        if (!insertionPoint)
+          continue;
 
-      // Replace the tensor::EmptyOp.
-      rewriter.replaceOp(emptyTensor.getDefiningOp(), replacement);
+        bool isEquivalent =
+            state.areEquivalentBufferizedValues(v, operand.get());
+        emptyTensors[emptyTensor.getOperation()] =
+            EmptyTensorReplacement{&operand, neededValues, isEquivalent};
+      }
     }
-
-    // Advance to the next operation.
-    return WalkResult::advance();
   });
 
-  return failure(status.wasInterrupted());
+  for (const auto &it : emptyTensors) {
+    // Find a suitable insertion point.
+    Operation *insertionPoint =
+        findValidInsertionPoint(it.first, it.second.neededValues);
+    if (!insertionPoint)
+      continue;
+
+    // Create a replacement for the tensor::EmptyOp.
+    rewriter.setInsertionPoint(insertionPoint);
+    Value replacement =
+        rewriteFunc(rewriter, it.first->getLoc(), *it.second.operand);
+    if (!replacement)
+      continue;
+
+    // Replace the tensor::EmptyOp.
+    rewriter.replaceOp(it.first, replacement);
+  }
+
+  return success();
 }
 
 /// Try to eliminate tensor::EmptyOps inside `op`. An tensor::EmptyOp can be
@@ -252,6 +279,7 @@ struct EmptyTensorElimination
 void EmptyTensorElimination::runOnOperation() {
   Operation *op = getOperation();
   OneShotBufferizationOptions options;
+  options.allowReturnAllocs = true;
   OneShotAnalysisState state(op, options);
   if (failed(analyzeOp(op, state))) {
     signalPassFailure();
