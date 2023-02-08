@@ -147,8 +147,8 @@ void BufferizationAliasInfo::bufferizeInPlace(OpOperand &operand,
   if (inplaceBufferized.contains(&operand))
     return;
   markInPlace(operand);
-  for (OpResult result : state.getAliasingOpResults(operand))
-    aliasInfo.unionSets(result, operand.get());
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand))
+    aliasInfo.unionSets(alias.opResult, operand.get());
   ++statNumTensorInPlace;
 }
 
@@ -633,7 +633,8 @@ static bool hasReadAfterWriteInterference(
         // use.
         AliasingOpResultList aliases =
             state.getAliasingOpResults(*uConflictingWrite);
-        if (aliases.size() == 1 && aliases[0] == definition) {
+        if (aliases.getNumAliases() == 1 &&
+            aliases.getAliases()[0].opResult == definition) {
           LLVM_DEBUG(llvm::dbgs()
                      << "    no conflict: definition and write are same\n");
           continue;
@@ -692,9 +693,10 @@ static void getAliasingReads(DenseSet<OpOperand *> &res, Value root,
       // there would then be no flow of data from the extract_slice operand to
       // its result's uses.)
       if (!state.bufferizesToMemoryWrite(use)) {
-        AliasingOpResultList opResults = state.getAliasingOpResults(use);
-        if (llvm::any_of(opResults,
-                         [&](OpResult r) { return state.isValueRead(r); }))
+        AliasingOpResultList aliases = state.getAliasingOpResults(use);
+        if (llvm::any_of(aliases, [&](AliasingOpResult a) {
+              return state.isValueRead(a.opResult);
+            }))
           res.insert(&use);
       }
     }
@@ -738,9 +740,9 @@ static bool wouldCreateReadAfterWriteInterference(
   DenseSet<OpOperand *> usesRead, usesWrite;
   getAliasingReads(usesRead, operand.get(), aliasInfo, state);
   getAliasingInplaceWrites(usesWrite, operand.get(), aliasInfo, state);
-  for (OpResult result : state.getAliasingOpResults(operand)) {
-    getAliasingReads(usesRead, result, aliasInfo, state);
-    getAliasingInplaceWrites(usesWrite, result, aliasInfo, state);
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand)) {
+    getAliasingReads(usesRead, alias.opResult, aliasInfo, state);
+    getAliasingInplaceWrites(usesWrite, alias.opResult, aliasInfo, state);
   }
   if (!checkConsistencyOnly && state.bufferizesToMemoryWrite(operand))
     usesWrite.insert(&operand);
@@ -791,11 +793,10 @@ hasPrecedingAliasingNonWritableTensor(Value value, OpOperand *currentOpOperand,
       continue;
 
     // Follow reverse SSA use-def chain.
-    AliasingOpOperandList aliasingOpOperands =
-        state.getAliasingOpOperands(opResult);
-    for (OpOperand *opOperand : aliasingOpOperands)
-      if (aliasInfo.isInPlace(*opOperand) || currentOpOperand == opOperand)
-        worklist.push_back(opOperand->get());
+    for (AliasingOpOperand alias : state.getAliasingOpOperands(opResult))
+      if (aliasInfo.isInPlace(*alias.opOperand) ||
+          currentOpOperand == alias.opOperand)
+        worklist.push_back(alias.opOperand->get());
   }
   return false;
 }
@@ -808,8 +809,8 @@ static bool wouldCreateWriteToNonWritableBuffer(
   // Collect writes of all aliases of OpOperand and OpResult.
   DenseSet<OpOperand *> usesWrite;
   getAliasingInplaceWrites(usesWrite, operand.get(), aliasInfo, state);
-  for (OpResult result : state.getAliasingOpResults(operand)) {
-    getAliasingInplaceWrites(usesWrite, result, aliasInfo, state);
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand)) {
+    getAliasingInplaceWrites(usesWrite, alias.opResult, aliasInfo, state);
   }
   if (!checkConsistencyOnly && state.bufferizesToMemoryWrite(operand))
     usesWrite.insert(&operand);
@@ -944,16 +945,42 @@ static LogicalResult inPlaceAnalysis(Operation *op,
 static void equivalenceAnalysis(SmallVector<Operation *> &ops,
                                 BufferizationAliasInfo &aliasInfo,
                                 AnalysisState &state) {
-  for (Operation *op : ops)
-    if (auto bufferizableOp = state.getOptions().dynCastBufferizableOp(op))
-      for (OpResult opResult : op->getOpResults())
-        if (opResult.getType().isa<TensorType>())
-          for (OpOperand *opOperand :
-               bufferizableOp.getAliasingOpOperands(opResult, state))
-            if (state.isInPlace(*opOperand))
-              if (bufferizableOp.bufferRelation(opResult, state) ==
-                  BufferRelation::Equivalent)
-                aliasInfo.unionEquivalenceClasses(opResult, opOperand->get());
+  for (Operation *op : ops) {
+    if (auto bufferizableOp = state.getOptions().dynCastBufferizableOp(op)) {
+      for (OpResult opResult : op->getOpResults()) {
+        if (!opResult.getType().isa<TensorType>())
+          continue;
+        AliasingOpOperandList aliases = state.getAliasingOpOperands(opResult);
+        if (aliases.getNumAliases() == 0)
+          // Nothing to do if there are no aliasing OpOpeands.
+          continue;
+
+        Value firstOperand = aliases.begin()->opOperand->get();
+        bool allEquivalent = true;
+        for (AliasingOpOperand alias : aliases) {
+          bool isEquiv = alias.relation == BufferRelation::Equivalent;
+          bool isInPlace = state.isInPlace(*alias.opOperand);
+          Value operand = alias.opOperand->get();
+          if (isEquiv && isInPlace && alias.isDefinite) {
+            // Found a definite, equivalent alias. Merge equivalence sets.
+            // There can only be one definite alias, so we can stop here.
+            aliasInfo.unionEquivalenceClasses(opResult, operand);
+            allEquivalent = false;
+            break;
+          }
+          if (!isEquiv || !isInPlace)
+            allEquivalent = false;
+          if (!state.areEquivalentBufferizedValues(operand, firstOperand))
+            allEquivalent = false;
+        }
+
+        // If all "maybe" aliases are equivalent and the OpResult is not a new
+        // allocation, it is a definite, equivalent alias.
+        if (allEquivalent && !bufferizableOp.bufferizesToAllocation(opResult))
+          aliasInfo.unionEquivalenceClasses(opResult, firstOperand);
+      }
+    }
+  }
 }
 
 /// Analyze equivalence of tied OpResult/OpOperand pairs of all ops contained
