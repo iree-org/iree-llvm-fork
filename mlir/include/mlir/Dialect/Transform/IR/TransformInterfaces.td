@@ -137,10 +137,10 @@ def TransformHandleTypeInterface
     : TransformTypeInterfaceBase<"TransformHandleTypeInterface",
                                  "::mlir::Operation *"> {
   let description = [{
-    Types that can be used for the Transform dialect operation handle values.
-    Such types define the properties of Payload IR operations associated with
-    the handle. A user of such a handle can assume that these properties have
-    been verified for any Payload IR operation associated with it.
+    Types that can be used for the Transform dialect handle values. Such types
+    define the properties of Payload IR operations associated with the handle.
+    A user of such a handle can assume that these properties have been verified
+    for any Payload IR operation associated with it.
   }];
 }
 
@@ -155,21 +155,9 @@ def TransformParamTypeInterface
   }];
 }
 
-def TransformValueHandleTypeInterface
-    : TransformTypeInterfaceBase<"TransformValueHandleTypeInterface",
-                                 "::mlir::Value"> {
-  let description = [{
-    Types that can be used for the Transform dialect handle values pointing to
-    Payload IR values. Such types define the properties of Payload IR values
-    associated with the handle. Users of such a handle can assume that these
-    properties have been verified for any Payload IR value associated with it.
-  }];
-}
-
 def Transform_AnyHandleOrParamType
   : Type<Or<[TransformParamTypeInterface.predicate,
-             TransformHandleTypeInterface.predicate,
-             TransformValueHandleTypeInterface.predicate]>,
+             TransformHandleTypeInterface.predicate]>,
          "any transform handle or parameter">;
 
 def FunctionalStyleTransformOpTrait
