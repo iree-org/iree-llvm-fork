@@ -398,6 +398,15 @@ AnalysisState::getAliasingOpResults(OpOperand &opOperand) const {
   return detail::unknownGetAliasingOpResults(opOperand);
 }
 
+bool AnalysisState::bufferizesToAllocation(OpResult opResult) const {
+  if (Operation *op = opResult.getDefiningOp())
+    if (auto bufferizableOp = getOptions().dynCastBufferizableOp(op))
+      return bufferizableOp.bufferizesToAllocation(opResult);
+
+  // The op is not bufferizable. Conservatively return true.
+  return true;
+}
+
 /// Return true if `opOperand` bufferizes to a memory read. Return `true` if the
 /// op is not bufferizable.
 bool AnalysisState::bufferizesToMemoryRead(OpOperand &opOperand) const {
@@ -536,6 +545,34 @@ llvm::SetVector<Value> AnalysisState::findDefinitions(Value value) const {
   config.alwaysIncludeLeaves = false;
   return findValueInReverseUseDefChain(
       value, [&](Value v) { return this->bufferizesToMemoryWrite(v); }, config);
+}
+
+llvm::SetVector<OpResult> AnalysisState::findAllocations(Value value) const {
+  TraversalConfig config;
+  config.alwaysIncludeLeaves = true;
+  config.followInPlaceOnly = true;
+  auto bufferizesToAlloc = [&](Value v) {
+    auto opResult = v.dyn_cast<OpResult>();
+    if (!opResult)
+      return true;
+    return bufferizesToAllocation(opResult);
+  };
+  SetVector<Value> potentialAllocs =
+      findValueInReverseUseDefChain(value, bufferizesToAlloc, config);
+  SetVector<OpResult> result;
+  for (Value v : potentialAllocs) {
+    auto opResult = v.dyn_cast<OpResult>();
+    if (!opResult)
+      continue;
+    if (bufferizesToAllocation(opResult))
+      result.insert(opResult);
+    if (llvm::any_of(getAliasingOpOperands(opResult),
+                     [&](AliasingOpOperand alias) {
+                       return !isInPlace(*alias.opOperand);
+                     }))
+      result.insert(opResult);
+  }
+  return result;
 }
 
 AnalysisState::AnalysisState(const BufferizationOptions &options)

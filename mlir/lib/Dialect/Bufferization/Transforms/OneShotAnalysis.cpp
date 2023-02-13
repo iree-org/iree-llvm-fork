@@ -1014,35 +1014,22 @@ static LogicalResult assertNoAllocsReturned(Operation *op,
         !state.getOptions().isOpAllowed(returnOp))
       return WalkResult::advance();
 
+    // The block from which the op is yielding.
+    Block *block = returnOp->getBlock();
+
     for (OpOperand &returnValOperand : returnOp->getOpOperands()) {
       Value returnVal = returnValOperand.get();
+
       // Skip non-tensor values.
       if (!returnVal.getType().isa<TensorType>())
         continue;
 
-      bool foundEquivValue = false;
-      state.applyOnEquivalenceClass(returnVal, [&](Value equivVal) {
-        if (auto bbArg = equivVal.dyn_cast<BlockArgument>()) {
-          Operation *definingOp = bbArg.getOwner()->getParentOp();
-          if (definingOp->isProperAncestor(returnOp))
-            foundEquivValue = true;
-          return;
-        }
-
-        Operation *definingOp = equivVal.getDefiningOp();
-        if (definingOp->getBlock()->findAncestorOpInBlock(
-                *returnOp->getParentOp()))
-          // Skip ops that happen after `returnOp` and parent ops.
-          if (happensBefore(definingOp, returnOp, domInfo))
-            foundEquivValue = true;
-      });
-
-      // Note: Returning/yielding buffer allocations is allowed only if
-      // `allowReturnAllocs` is set.
-      if (!foundEquivValue)
-        status = returnOp->emitError()
-                 << "operand #" << returnValOperand.getOperandNumber()
-                 << " may return/yield a new buffer allocation";
+      for (OpResult alloc : state.findAllocations(returnVal)) {
+        if (block->findAncestorOpInBlock(*alloc.getDefiningOp()))
+          status = returnOp->emitError()
+                   << "operand #" << returnValOperand.getOperandNumber()
+                   << " may return/yield a new buffer allocation";
+      }
     }
 
     return WalkResult::advance();

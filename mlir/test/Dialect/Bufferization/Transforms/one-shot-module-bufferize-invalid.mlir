@@ -36,23 +36,6 @@ func.func @swappy(%cond1 : i1, %cond2 : i1, %t1 : tensor<f32>, %t2 : tensor<f32>
 
 // -----
 
-func.func @scf_if_not_equivalent(
-    %cond: i1, %t1: tensor<?xf32> {bufferization.writable = true},
-    %idx: index) -> tensor<?xf32> {
-  %r = scf.if %cond -> (tensor<?xf32>) {
-    scf.yield %t1 : tensor<?xf32>
-  } else {
-    // This buffer aliases, but it is not equivalent.
-    %t2 = tensor.extract_slice %t1 [%idx] [%idx] [1] : tensor<?xf32> to tensor<?xf32>
-    // expected-error @+1 {{operand #0 may return/yield a new buffer allocation}}
-    scf.yield %t2 : tensor<?xf32>
-  }
-  // expected-error @+1 {{operand #0 may return/yield a new buffer allocation}}
-  return %r : tensor<?xf32>
-}
-
-// -----
-
 func.func @scf_if_not_aliasing(
     %cond: i1, %t1: tensor<?xf32> {bufferization.writable = true},
     %idx: index) -> f32 {
@@ -175,36 +158,6 @@ func.func @scf_yield_needs_copy(%A : tensor<?xf32> {bufferization.writable = tru
   }
   call @fun_with_side_effects(%res) : (tensor<?xf32>) -> ()
   return
-}
-
-// -----
-
-func.func @extract_slice_fun(%A : tensor<?xf32> {bufferization.writable = true})
-  ->  tensor<4xf32>
-{
-  // This bufferizes to a pattern that the cross-function boundary pass needs to
-  // convert into a new memref argument at all call site; this may be either:
-  //   - an externally created aliasing subview (if we want to allow aliasing
-  //     function arguments).
-  //   - a new alloc + copy (more expensive but does not create new function
-  //     argument aliasing).
-  %r0 = tensor.extract_slice %A[0][4][1] : tensor<?xf32> to tensor<4xf32>
-
-  // expected-error @+1 {{operand #0 may return/yield a new buffer allocation}}
-  return %r0: tensor<4xf32>
-}
-
-// -----
-
-func.func @scf_yield(%b : i1, %A : tensor<4xf32>, %B : tensor<4xf32>) -> tensor<4xf32>
-{
-  %r = scf.if %b -> (tensor<4xf32>) {
-    scf.yield %A : tensor<4xf32>
-  } else {
-    scf.yield %B : tensor<4xf32>
-  }
-  // expected-error @+1 {{operand #0 may return/yield a new buffer allocation}}
-  return %r: tensor<4xf32>
 }
 
 // -----

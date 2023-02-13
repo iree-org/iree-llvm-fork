@@ -402,6 +402,10 @@ public:
   /// bufferizable.
   AliasingOpResultList getAliasingOpResults(OpOperand &opOperand) const;
 
+  /// Return `true` if `opResult` bufferizes to a memory allocation. Return
+  /// `true` if the op is not bufferizable.
+  bool bufferizesToAllocation(OpResult opResult) const;
+
   /// Return true if `opOperand` bufferizes to a memory read. Return `true` if
   /// the op is not bufferizable.
   bool bufferizesToMemoryRead(OpOperand &opOperand) const;
@@ -491,6 +495,11 @@ public:
   /// Note: OpResults of unknown ops are handled conservatively and assumed to
   /// be definitions.
   SetVector<Value> findDefinitions(Value value) const;
+
+  /// Find the OpResults in the reverse use-def chain that are a buffer
+  /// allocation. Either because they bufferize to an allocation or because
+  /// at least one of their aliasing OpOperands is out-of-place.
+  SetVector<OpResult> findAllocations(Value value) const;
 
   /// Return `true` if the given OpResult has been decided to bufferize inplace.
   virtual bool isInPlace(OpOperand &opOperand) const;
