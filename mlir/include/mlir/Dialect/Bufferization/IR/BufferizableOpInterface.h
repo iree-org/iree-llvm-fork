@@ -371,6 +371,23 @@ struct BufferizationOptions {
 /// Return `true` if the given value is a BlockArgument of a func::FuncOp.
 bool isFunctionArgument(Value value);
 
+/// Traversal parameters for `findValueInReverseUseDefChain`.
+struct TraversalConfig {
+  /// Specifies if leaves (that do not further OpOperands to follow) should
+  /// be returned even if they do not match the specified filter.
+  bool alwaysIncludeLeaves = true;
+
+  /// Specifies whether out-of-place/undecided OpOperands should be followed.
+  bool followInPlaceOnly = false;
+
+  /// Specifies whether non-equivalent OpOperands should be followed.
+  bool followEquivalentOnly = false;
+
+  /// Specifies whether unknown/non-bufferizable/ops not included in the
+  /// OpFilter of BufferizationOptions should be follwed.
+  bool followUnknownOps = false;
+};
+
 /// AnalysisState provides a variety of helper functions for dealing with
 /// tensor values.
 class AnalysisState {
@@ -416,9 +433,8 @@ public:
   /// `condition` evaluates to true. OpOperands of such matching Values are not
   /// traversed any further.
   ///
-  /// When reaching the end of a chain (BlockArgument or Value without aliasing
-  /// OpOperands), also return the last Value of that chain if
-  /// `alwaysIncludeLeaves` is set.
+  /// When reaching the end of a chain, also return the last Value of that
+  /// chain if `config.alwaysIncludeLeaves` is set.
   ///
   /// Example:
   ///
@@ -436,10 +452,11 @@ public:
   /// starting the traversal from Value 1, the resulting SetVector is:
   /// { 2, 7, 8, 5 }
   ///
-  /// If `followEquivalentOnly` is set, only equivalent OpOperands are selected.
+  /// Additional stopping conditions for the traversal can be specified in
+  /// `config`.
   SetVector<Value> findValueInReverseUseDefChain(
       Value value, llvm::function_ref<bool(Value)> condition,
-      bool followEquivalentOnly = false, bool alwaysIncludeLeaves = true) const;
+      TraversalConfig config = TraversalConfig()) const;
 
   /// Find the values that may define the contents of the given value at
   /// runtime. A block argument is always a definition. An OpResult is a
