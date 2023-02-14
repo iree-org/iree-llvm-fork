@@ -2209,7 +2209,13 @@ static Value foldInsertAfterExtractSlice(InsertSliceOp insertOp) {
 OpFoldResult InsertSliceOp::fold(FoldAdaptor) {
   if (getSourceType().hasStaticShape() && getType().hasStaticShape() &&
       getSourceType() == getType() &&
-      succeeded(foldIdentityOffsetSizeAndStrideOpInterface(*this, getType())))
+      succeeded(foldIdentityOffsetSizeAndStrideOpInterface(*this, getType())) &&
+      (!this->getDest().getDefiningOp() ||
+       this->getDest().getDefiningOp()->getName().getStringRef() !=
+           "linalg.copy") &&
+      (!this->getDest().getDefiningOp() ||
+       this->getDest().getDefiningOp()->getName().getStringRef() !=
+           "scf.foreach_thread"))
     return this->getSource();
   if (succeeded(foldInsertAfterInsertSlice(*this)))
     return getResult();
