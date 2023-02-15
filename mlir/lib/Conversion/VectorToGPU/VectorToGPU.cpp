@@ -430,11 +430,11 @@ struct CombineTransferReadOpTranspose final
     // Look through integer extend ops.
     Value source = op.getVector();
     auto extOp = source.getDefiningOp<arith::ExtSIOp>();
-    auto resultType = op.getVectorType();
+    Type resultType = op.getType();
     if (extOp) {
       source = extOp.getOperand();
       resultType =
-          VectorType::get(resultType.getShape(),
+          VectorType::get(resultType.cast<VectorType>().getShape(),
                           source.getType().cast<VectorType>().getElementType());
     }
 
