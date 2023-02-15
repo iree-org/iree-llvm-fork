@@ -4289,6 +4289,11 @@ public:
     }
 
     // Fail if tensor::ExtractSliceOp and tensor::InsertSliceOp sizes differ.
+    if (insertOp.getMixedSizes().size() != extractOp.getMixedSizes().size()) {
+      return rewriter.notifyMatchFailure(
+          insertOp, "InsertSliceOp and ExtractSliceOp ranks differ");
+    }
+
     for (auto [insertSize, extractSize] :
          llvm::zip_equal(insertOp.getMixedSizes(), extractOp.getMixedSizes())) {
       if (!isEqualConstantIntOrValue(insertSize, extractSize)) {
@@ -5337,8 +5342,8 @@ void MaskOp::build(
 }
 
 void MaskOp::build(
-    OpBuilder &builder, OperationState &result, TypeRange resultTypes, Value mask,
-    Value passthru, Operation *maskableOp,
+    OpBuilder &builder, OperationState &result, TypeRange resultTypes,
+    Value mask, Value passthru, Operation *maskableOp,
     function_ref<void(OpBuilder &, Operation *)> maskRegionBuilder) {
   build(builder, result, mask, maskableOp, maskRegionBuilder);
   if (passthru)
