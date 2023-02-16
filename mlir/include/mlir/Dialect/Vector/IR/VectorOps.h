@@ -191,7 +191,7 @@ bool isDisjointTransferSet(VectorTransferOpInterface transferA,
 /// Return the result value of reducing two scalar/vector values with the
 /// corresponding arith operation.
 Value makeArithReduction(OpBuilder &b, Location loc, CombiningKind kind,
-                         Value v1, Value v2);
+                         Value v1, Value acc, Value mask = Value());
 
 /// Returns true if `attr` has "parallel" iterator type semantics.
 inline bool isParallelIterator(Attribute attr) {
@@ -214,8 +214,12 @@ void createMaskOpRegion(OpBuilder &builder, Operation *maskableOp);
 /// Creates a vector.mask operation around a maskable operation. Returns the
 /// vector.mask operation if the mask provided is valid. Otherwise, returns the
 /// maskable operation itself.
-Operation *maskOperation(RewriterBase &rewriter, Operation *maskableOp,
-                         Value mask);
+Operation *maskOperation(OpBuilder &builder, Operation *maskableOp,
+                         Value mask, Value passthru = Value());
+
+/// TODO.
+Value selectPassthruWithMask(OpBuilder &builder, Value mask, Value newValue,
+                             Value passthru);
 
 } // namespace vector
 } // namespace mlir
