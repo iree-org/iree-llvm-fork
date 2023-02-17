@@ -549,31 +549,38 @@ LogicalResult GeneralizeOuterUnitDimsPackOpPattern::matchAndRewrite(
                                        "require inner tile sizes being static");
   }
 
-  // 1. Use rank-reduced tensor.extract_slice op to extract the tile.
+  // 1. Use rank-reduced tensor.extract_slice op to extract the tile. This also
+  // creates a tensor.cast op right before the rank-reduced
+  // tensor.extract_slice. This is a known information because all the outer
+  // dims are 1s in packed domain; it is extremely helpful for other analysis.
   Location loc = packOp.getLoc();
   Attribute zeroIdxAttr = rewriter.getIndexAttr(0);
   Attribute oneIdxAttr = rewriter.getIndexAttr(1);
   SmallVector<OpFoldResult> readOffsets(srcRank, zeroIdxAttr);
   SmallVector<OpFoldResult> readStrides(srcRank, oneIdxAttr);
   SmallVector<OpFoldResult> readSizes;
-  SmallVector<int64_t> readShape;
+  SmallVector<int64_t> readShape, castShape;
   DenseMap<int64_t, OpFoldResult> dimAndTileMapping =
       packOp.getDimAndTileMapping();
   for (auto i : llvm::seq<unsigned>(0, srcRank)) {
     if (!dimAndTileMapping.count(i)) {
       readSizes.push_back(oneIdxAttr);
+      castShape.push_back(1);
       continue;
     }
     readSizes.push_back(dimAndTileMapping[i]);
     readShape.push_back(getConstantIntValue(dimAndTileMapping[i])
                             .value_or(ShapedType::kDynamic));
+    castShape.push_back(readShape.back());
   }
   Type elemType = packOp.getSourceType().getElementType();
   auto readType = RankedTensorType::get(readShape, elemType);
 
   Value input = getPackOpSourceOrPaddedSource(rewriter, packOp);
+  Value cast = rewriter.create<tensor::CastOp>(
+      loc, RankedTensorType::get(castShape, elemType), input);
   Value tile = rewriter.create<tensor::ExtractSliceOp>(
-      loc, readType, input, readOffsets, readSizes, readStrides);
+      loc, readType, cast, readOffsets, readSizes, readStrides);
 
   // 2. Transpose the tile to match the inner tile order.
   SmallVector<int64_t> perm =

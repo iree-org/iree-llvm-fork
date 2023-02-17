@@ -19,8 +19,9 @@ func.func @KCRS_to_KCRSsr(%arg0: tensor<1x1x128x64xf32>, %arg1: tensor<1x1x4x8x8
 // CHECK:             %[[IN_S_SZ:.+]] = affine.min #[[MAP3]](%[[S]])
 // CHECK:             %[[SRC_SLICE:.+]] = tensor.extract_slice %[[SRC]]
 // CHECK-SAME:          [0, 0, %[[IN_R]], %[[IN_S]]] [1, 1, %[[IN_R_SZ]], %[[IN_S_SZ]]] [1, 1, 1, 1]
-// CHECK:             %[[TILE:.+]] = tensor.extract_slice %[[SRC_SLICE]]
-// CHECK-SAME:          [0, 0, 0, 0] [1, 1, 32, 8] [1, 1, 1, 1] : tensor<1x1x?x?xf32> to tensor<32x8xf32>
+// CHECK:             %[[CAST:.+]] = tensor.cast %[[SRC_SLICE]] : tensor<1x1x?x?xf32> to tensor<1x1x32x8xf32>
+// CHECK:             %[[TILE:.+]] = tensor.extract_slice %[[CAST]]
+// CHECK-SAME:          [0, 0, 0, 0] [1, 1, 32, 8] [1, 1, 1, 1] : tensor<1x1x32x8xf32> to tensor<32x8xf32>
 // CHECK:             %[[EMPTY:.+]] = tensor.empty() : tensor<8x32xf32>
 // CHECK:             %[[TRANSP:.+]] =  linalg.transpose
 // CHECK-SAME:          ins(%[[TILE]]
@@ -85,8 +86,7 @@ func.func @KC_to_CKkc(%arg0: tensor<128x256xf32>, %arg1: tensor<32x4x32x8xf32>) 
 // CHECK-DAG:         %[[IN_C_SZ:.+]] = affine.min #[[MAP3]](%[[C]])
 // CHECK:             %[[SRC_SLICE:.+]] = tensor.extract_slice %[[SRC]]
 // CHECK-SAME:          [%[[IN_K]], %[[IN_C]]] [%[[IN_K_SZ]], %[[IN_C_SZ]]] [1, 1]
-// CHECK:             %[[TILE:.+]] = tensor.extract_slice %[[SRC_SLICE]]
-// CHECK-SAME:          [0, 0] [32, 8] [1, 1] : tensor<?x?xf32> to tensor<32x8xf32>
+// CHECK:             %[[TILE:.+]] = tensor.cast %[[SRC_SLICE]] : tensor<?x?xf32> to tensor<32x8xf32>
 // CHECK:             %[[EMPTY:.+]] = tensor.empty() : tensor<32x8xf32>
 // CHECK:             %[[TRANSP:.+]] =  linalg.transpose
 // CHECK-SAME:          ins(%[[TILE]]
