@@ -18,9 +18,43 @@
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
 #include "llvm/Support/TargetSelect.h"
+#include "llvm/IRReader/IRReader.h"
+#include "llvm/Linker/Linker.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/Bitcode/BitcodeReader.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Linker/Linker.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Passes/StandardInstrumentations.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/IPO.h"
+#include "llvm/Transforms/IPO/Internalize.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/NVGPU/IR/NVGPUDialect.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LogicalResult.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Export.h"
 
 #include <cuda.h>
 
+static llvm::cl::opt<std::string> libDevicePath(
+    "cuda-libdevice-path", llvm::cl::desc("path to libdevice.bc"),
+    llvm::cl::init(""));
+
+namespace llvm {
+class FunctionPass;
+FunctionPass *createNVVMIntrRangePass(unsigned int SmVersion);
+FunctionPass *createNVVMReflectPass(unsigned int SmVersion);
+}  // namespace llvm
 using namespace mlir;
 
 static void emitCudaError(const llvm::Twine &expr, const char *buffer,
@@ -56,6 +90,10 @@ public:
     return "Lower GPU kernel function to CUBIN binary annotations";
   }
 
+protected:
+  LogicalResult optimizeLlvm(llvm::Module &llvmModule,
+                                     llvm::TargetMachine &targetMachine) override;
+
 private:
   void getDependentDialects(DialectRegistry &registry) const override;
 
@@ -82,6 +120,76 @@ void SerializeToCubinPass::getDependentDialects(
     DialectRegistry &registry) const {
   registerNVVMDialectTranslation(registry);
   gpu::SerializeToBlobPass::getDependentDialects(registry);
+}
+
+LogicalResult SerializeToCubinPass::optimizeLlvm(llvm::Module &module,
+                                     llvm::TargetMachine &targetMachine) {
+ llvm::Linker linker(module);
+
+ std::string path(libDevicePath);
+ if(path.empty())
+  return success();
+ llvm::SMDiagnostic Err;
+ std::unique_ptr<llvm::Module> bitcodeModule =
+     llvm::parseIRFile(path, Err, module.getContext());
+
+ if (!bitcodeModule) {
+    llvm::errs() << "failed to parse CUDA libdevice bitcode";
+    return failure();
+  }
+  // Ignore the data layout of the module we're importing. This avoids a
+  // warning from the linker.
+  bitcodeModule->setDataLayout(module.getDataLayout());
+  linker.linkInModule(
+      std::move(bitcodeModule), llvm::Linker::Flags::LinkOnlyNeeded,
+      [](llvm::Module &M, const llvm::StringSet<> &GVS) {
+        llvm::internalizeModule(M, [&GVS](const llvm::GlobalValue &GV) {
+          return !GV.hasName() || (GVS.count(GV.getName()) == 0);
+        });
+      });
+
+   // run optimizer. Code from IREE CUDA target.
+
+   
+  // Workaround run those passed ahead as they are temporarily disabled in NVPTX
+  // target.
+  llvm::legacy::PassManager legacyPM;
+  legacyPM.add(llvm::createNVVMIntrRangePass(35));
+  legacyPM.add(llvm::createNVVMReflectPass(35));
+  legacyPM.run(module);
+
+  llvm::LoopAnalysisManager lam;
+  llvm::FunctionAnalysisManager fam;
+  llvm::CGSCCAnalysisManager cgam;
+  llvm::ModuleAnalysisManager mam;
+
+  fam.registerPass([&] { return targetMachine.getTargetIRAnalysis(); });
+
+  llvm::PipelineTuningOptions pto;
+  pto.SLPVectorization = false;
+
+  llvm::PassInstrumentationCallbacks pic;
+
+  llvm::StandardInstrumentations si(module.getContext(), false);
+  si.registerCallbacks(pic, &fam);
+
+  llvm::PassBuilder pb(&targetMachine, pto, std::nullopt, &pic);
+  pb.registerModuleAnalyses(mam);
+  pb.registerCGSCCAnalyses(cgam);
+  pb.registerFunctionAnalyses(fam);
+  pb.registerLoopAnalyses(lam);
+  pb.crossRegisterProxies(lam, fam, cgam, mam);
+
+  llvm::OptimizationLevel ol = llvm::OptimizationLevel::O2;
+
+  llvm::ModulePassManager mpm;
+  mpm.addPass(llvm::VerifierPass());
+  mpm.addPass(pb.buildPerModuleDefaultPipeline(ol));
+  mpm.addPass(llvm::VerifierPass());
+
+  mpm.run(module, mam);   
+
+ return success();
 }
 
 std::unique_ptr<std::vector<char>>
