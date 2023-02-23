@@ -14,18 +14,22 @@
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
 
 #if MLIR_GPU_TO_CUBIN_PASS_ENABLE
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/NVGPU/IR/NVGPUDialect.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LogicalResult.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Export.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/IRReader/IRReader.h"
-#include "llvm/Linker/Linker.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
@@ -35,26 +39,18 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#include "mlir/Dialect/GPU/IR/GPUDialect.h"
-#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
-#include "mlir/Dialect/NVGPU/IR/NVGPUDialect.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Support/LogicalResult.h"
-#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
-#include "mlir/Target/LLVMIR/Export.h"
 
 #include <cuda.h>
 
-static llvm::cl::opt<std::string> libDevicePath(
-    "cuda-libdevice-path", llvm::cl::desc("path to libdevice.bc"),
-    llvm::cl::init(""));
+static llvm::cl::opt<std::string>
+    libDevicePath("cuda-libdevice-path", llvm::cl::desc("path to libdevice.bc"),
+                  llvm::cl::init(""));
 
 namespace llvm {
 class FunctionPass;
 FunctionPass *createNVVMIntrRangePass(unsigned int SmVersion);
 FunctionPass *createNVVMReflectPass(unsigned int SmVersion);
-}  // namespace llvm
+} // namespace llvm
 using namespace mlir;
 
 static void emitCudaError(const llvm::Twine &expr, const char *buffer,
@@ -92,7 +88,7 @@ public:
 
 protected:
   LogicalResult optimizeLlvm(llvm::Module &llvmModule,
-                                     llvm::TargetMachine &targetMachine) override;
+                             llvm::TargetMachine &targetMachine) override;
 
 private:
   void getDependentDialects(DialectRegistry &registry) const override;
@@ -122,18 +118,19 @@ void SerializeToCubinPass::getDependentDialects(
   gpu::SerializeToBlobPass::getDependentDialects(registry);
 }
 
-LogicalResult SerializeToCubinPass::optimizeLlvm(llvm::Module &module,
-                                     llvm::TargetMachine &targetMachine) {
- llvm::Linker linker(module);
+LogicalResult
+SerializeToCubinPass::optimizeLlvm(llvm::Module &module,
+                                   llvm::TargetMachine &targetMachine) {
+  llvm::Linker linker(module);
 
- std::string path(libDevicePath);
- if(path.empty())
-  return success();
- llvm::SMDiagnostic Err;
- std::unique_ptr<llvm::Module> bitcodeModule =
-     llvm::parseIRFile(path, Err, module.getContext());
+  std::string path(libDevicePath);
+  if (path.empty())
+    return success();
+  llvm::SMDiagnostic Err;
+  std::unique_ptr<llvm::Module> bitcodeModule =
+      llvm::parseIRFile(path, Err, module.getContext());
 
- if (!bitcodeModule) {
+  if (!bitcodeModule) {
     llvm::errs() << "failed to parse CUDA libdevice bitcode";
     return failure();
   }
@@ -148,9 +145,8 @@ LogicalResult SerializeToCubinPass::optimizeLlvm(llvm::Module &module,
         });
       });
 
-   // run optimizer. Code from IREE CUDA target.
+  // run optimizer. Code from IREE CUDA target.
 
-   
   // Workaround run those passed ahead as they are temporarily disabled in NVPTX
   // target.
   llvm::legacy::PassManager legacyPM;
@@ -187,9 +183,9 @@ LogicalResult SerializeToCubinPass::optimizeLlvm(llvm::Module &module,
   mpm.addPass(pb.buildPerModuleDefaultPipeline(ol));
   mpm.addPass(llvm::VerifierPass());
 
-  mpm.run(module, mam);   
+  mpm.run(module, mam);
 
- return success();
+  return success();
 }
 
 std::unique_ptr<std::vector<char>>

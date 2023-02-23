@@ -86,7 +86,7 @@ struct GpuTransformAllocPass
         registerOnDevice(memref);
         continue;
       }
-      bool onlyUsedOnDevice = false;//true;
+      bool onlyUsedOnDevice = false; // true;
       for(Operation* userOp : alloc->getUsers()) {
         if(!isa<gpu::LaunchFuncOp, memref::DeallocOp>(userOp)) {
           onlyUsedOnDevice = false;
