@@ -424,16 +424,15 @@ void transform::FuseIntoContainingOp::build(OpBuilder &builder,
 /// Find the first "extract" user of `producerOp` and tile it right before its
 /// use. The tiled op is fused under the `containingOp`.
 /// Return this fused op on success or nullptr if anything fails.
-static Operation *tileAndFuseFirstExtractUse(RewriterBase &rewriter,
-                                             Diagnostic &diag,
-                                             Operation *producerOp,
-                                             Operation *containingOp) {
+static SmallVector<Operation *>
+tileAndFuseFirstExtractUse(RewriterBase &rewriter, Diagnostic &diag,
+                           Operation *producerOp, Operation *containingOp) {
   LLVM_DEBUG(DBGS() << "Try to fuse a direct extract use\n");
   auto tileableProducer = dyn_cast<TilingInterface>(producerOp);
   if (!tileableProducer) {
     diag.attachNote(producerOp->getLoc())
         << "producer is not a TileableInterface: " << *producerOp;
-    return nullptr;
+    return {};
   }
 
   // Search the producer slices accessed within the containing operation.
@@ -448,7 +447,7 @@ static Operation *tileAndFuseFirstExtractUse(RewriterBase &rewriter,
   if (it == tileableProducer->getUsers().end()) {
     diag.attachNote(tileableProducer->getLoc())
         << "could not find fusion opportunity for: " << *tileableProducer;
-    return nullptr;
+    return {};
   }
   auto sliceOpToTile = cast<tensor::ExtractSliceOp>(*it);
 
@@ -461,27 +460,30 @@ static Operation *tileAndFuseFirstExtractUse(RewriterBase &rewriter,
       sliceOpToTile.getSource().cast<OpResult>().getResultNumber();
   LLVM_DEBUG(DBGS() << "resultNumber: " << resultNumber << "\n");
 
-  FailureOr<Value> tiledProducer = tileableProducer.generateResultTileValue(
-      rewriter, resultNumber, sliceOpToTile.getMixedOffsets(),
-      sliceOpToTile.getMixedSizes());
-  if (failed(tiledProducer)) {
+  FailureOr<TilingResult> tileAndFuseResult =
+      tileableProducer.generateResultTileValue(rewriter, resultNumber,
+                                               sliceOpToTile.getMixedOffsets(),
+                                               sliceOpToTile.getMixedSizes());
+  if (failed(tileAndFuseResult)) {
     diag.attachNote(tileableProducer->getLoc())
         << "failed to tile producer op: " << *tileableProducer;
-    return nullptr;
+    return {};
   }
-  LLVM_DEBUG(DBGS() << "tiledProducer: " << *tiledProducer << "\n");
+  for (auto tiledOp : tileAndFuseResult->tiledOps) {
+    LLVM_DEBUG(DBGS() << "tiledProducer: " << *tiledOp << "\n");
+  }
 
   // Replace the extract op.
-  Operation *fusedOp = tiledProducer->getDefiningOp();
   auto maybeRankReduced = tensor::ExtractSliceOp::rankReduceIfNeeded(
-      rewriter, sliceOpToTile->getLoc(), fusedOp->getResult(resultNumber),
+      rewriter, sliceOpToTile->getLoc(),
+      tileAndFuseResult->tiledValues[resultNumber],
       sliceOpToTile->getResult(0)
           .getType()
           .cast<RankedTensorType>()
           .getShape());
   assert(succeeded(maybeRankReduced) && "unexpected shape");
   rewriter.replaceOp(sliceOpToTile, *maybeRankReduced);
-  return fusedOp;
+  return tileAndFuseResult->tiledOps;
 }
 
 /// First, find the first "scf::ForallOp" user of `producerOp` and ensure
@@ -490,7 +492,8 @@ static Operation *tileAndFuseFirstExtractUse(RewriterBase &rewriter,
 /// right before its "extract" use. The tiled op is fused under the
 /// `containingOp`.
 /// Return this fused op on success or nullptr if anything fails.
-static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
+static SmallVector<Operation *>
+tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
     RewriterBase &rewriter, Diagnostic &diag, Operation *producerOp,
     Operation *containingOp) {
   LLVM_DEBUG(DBGS() << "Try to fuse an extract use through block argument\n");
@@ -499,7 +502,7 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
   if (!tileableProducer) {
     diag.attachNote(producerOp->getLoc())
         << "producer is not a TileableInterface: " << *producerOp;
-    return nullptr;
+    return {};
   }
 
   // Search the first use by a "scf::ForallOp" user.
@@ -513,7 +516,7 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
   if (!forallOp || forallOp != containingOp) {
     diag.attachNote(tileableProducer->getLoc())
         << "could not find a use by the containing op: " << *tileableProducer;
-    return nullptr;
+    return {};
   }
 
   // Search the producer slices accessed within the containing
@@ -535,7 +538,7 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
   if (itBBArgUsers == bbArg.getUsers().end()) {
     diag.attachNote(containingOp->getLoc())
         << "could not find fusion opportunity for bbArg: " << bbArg;
-    return nullptr;
+    return {};
   }
   auto sliceOpToTile = cast<tensor::ExtractSliceOp>(*itBBArgUsers);
 
@@ -555,7 +558,7 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
           destinationTensors))) {
     diag.attachNote(tileableProducer->getLoc())
         << "failed to get destination tensors for: " << *tileableProducer;
-    return nullptr;
+    return {};
   }
 
   IRMapping bvm;
@@ -566,21 +569,19 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
       llvm::make_scope_exit([&]() { rewriter.eraseOp(tileableProducerClone); });
 
   // Tile the producer.
-  FailureOr<Value> tiledProducer =
+  FailureOr<TilingResult> tileAndFuseResult =
       tileableProducerClone.generateResultTileValue(
           rewriter, resultNumber, sliceOpToTile.getMixedOffsets(),
           sliceOpToTile.getMixedSizes());
-  if (failed(tiledProducer)) {
+  if (failed(tileAndFuseResult)) {
     diag.attachNote(tileableProducer->getLoc())
         << "failed to tile producer op: " << *tileableProducer;
-    return nullptr;
+    return {};
   }
-  LLVM_DEBUG(DBGS() << "tiledProducer: " << *tiledProducer << "\n");
 
   // Replace the extract op.
-  Operation *fusedOp = tiledProducer->getDefiningOp();
   auto maybeRankReduced = tensor::ExtractSliceOp::rankReduceIfNeeded(
-      rewriter, sliceOpToTile->getLoc(), fusedOp->getResult(resultNumber),
+      rewriter, sliceOpToTile->getLoc(), tileAndFuseResult->tiledValues[0],
       sliceOpToTile->getResult(0)
           .getType()
           .cast<RankedTensorType>()
@@ -594,7 +595,7 @@ static Operation *tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
                              destinationTensors.front());
   });
 
-  return fusedOp;
+  return tileAndFuseResult->tiledOps;
 }
 
 static Operation *cloneAndFuseFirstUse(RewriterBase &rewriter, Diagnostic &diag,
@@ -707,21 +708,21 @@ transform::FuseIntoContainingOp::apply(transform::TransformResults &results,
     // cases, we can tile/clone once and reuse the value for each use.
     // Futhermore, producers should then be traversed according to a
     // topological sorting.
-    Operation *tiled =
+    SmallVector<Operation *> tiledOps =
         tileAndFuseFirstExtractUse(rewriter, diag, producerOp, containingOp);
-    if (tiled) {
+    if (!tiledOps.empty()) {
       LLVM_DEBUG(DBGS() << "\nFused a direct extract use\n" << *containingOp);
-      fusedOps.push_back(tiled);
+      fusedOps.append(tiledOps);
       continue;
     }
 
-    Operation *tiledContainingOpOperand =
+    SmallVector<Operation *> tiledContainingOpOperand =
         tileAndFuseFirstExtractUseThroughContainingOpBlockArgument(
             rewriter, diag, producerOp, containingOp);
-    if (tiledContainingOpOperand) {
+    if (!tiledContainingOpOperand.empty()) {
       LLVM_DEBUG(DBGS() << "\nFused an extract use through block argument\n"
                         << *containingOp);
-      fusedOps.push_back(tiledContainingOpOperand);
+      fusedOps.append(tiledContainingOpOperand);
       continue;
     }
 
