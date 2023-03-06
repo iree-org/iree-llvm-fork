@@ -1605,12 +1605,13 @@ Block *ConversionPatternRewriter::splitBlock(Block *block,
 
 void ConversionPatternRewriter::mergeBlocks(Block *source, Block *dest,
                                             ValueRange argValues) {
-  impl->notifyBlocksBeingMerged(dest, source);
-  assert(llvm::all_of(source->getPredecessors(),
-                      [dest](Block *succ) { return succ == dest; }) &&
-         "expected 'source' to have no predecessors or only 'dest'");
   assert(argValues.size() == source->getNumArguments() &&
          "incorrect # of argument replacement values");
+  assert(llvm::all_of(source->getUsers(),
+                      [&](Operation *op) { return impl->isOpIgnored(op); }) &&
+         "expected 'source' to have no predecessors");
+
+  impl->notifyBlocksBeingMerged(dest, source);
   for (auto it : llvm::zip(source->getArguments(), argValues))
     replaceUsesOfBlockArgument(std::get<0>(it), std::get<1>(it));
   dest->getOperations().splice(dest->end(), source->getOperations());
