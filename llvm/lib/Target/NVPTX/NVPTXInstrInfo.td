@@ -1751,12 +1751,14 @@ def SDTWrapper : SDTypeProfile<1, 1, [SDTCisSameAs<0, 1>, SDTCisPtrTy<0>]>;
 def Wrapper    : SDNode<"NVPTXISD::Wrapper", SDTWrapper>;
 
 // Load a memory address into a u32 or u64 register.
+let isReMaterializable = 1 in {
 def MOV_ADDR : NVPTXInst<(outs Int32Regs:$dst), (ins imem:$a),
                          "mov.u32 \t$dst, $a;",
                          [(set Int32Regs:$dst, (Wrapper tglobaladdr:$a))]>;
 def MOV_ADDR64 : NVPTXInst<(outs Int64Regs:$dst), (ins imem:$a),
                            "mov.u64 \t$dst, $a;",
                            [(set Int64Regs:$dst, (Wrapper tglobaladdr:$a))]>;
+}
 
 // Get pointer to local stack.
 let hasSideEffects = false in {
