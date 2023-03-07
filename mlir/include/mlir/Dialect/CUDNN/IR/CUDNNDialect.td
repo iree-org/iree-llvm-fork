@@ -17,11 +17,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef CUDNN
-#define CUDNN
+#ifndef CUDNN_DIALECT
+#define CUDNN_DIALECT
 
-include "mlir/Interfaces/SideEffectInterfaces.td"
-include "mlir/IR/AttrTypeBase.td"
 include "mlir/IR/OpBase.td"
 
 def CUDNN_Dialect : Dialect {
@@ -32,7 +30,16 @@ def CUDNN_Dialect : Dialect {
   }];
 
   let useDefaultTypePrinterParser = 1;
-//  let useFoldAPI = kEmitFoldAdaptorFolder;
+  let extraClassDeclaration = [{
+    void registerTypes();
+  }];
 }
 
-#endif // CUDNN
+//===----------------------------------------------------------------------===//
+// Base operation definition.
+//===----------------------------------------------------------------------===//
+
+class CUDNN_Op<string mnemonic, list<Trait> traits = []> :
+        Op<CUDNN_Dialect, mnemonic, traits>;
+
+#endif // CUDNN_DIALECT
