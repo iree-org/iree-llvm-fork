@@ -52,6 +52,7 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Scalar.h"
@@ -69,6 +70,13 @@ using namespace PatternMatch;
 STATISTIC(NumChanged, "Number of insts reassociated");
 STATISTIC(NumAnnihil, "Number of expr tree annihilated");
 STATISTIC(NumFactor , "Number of multiplies factored");
+
+static cl::opt<bool>
+    UseScoreOpt(DEBUG_TYPE "-use-score", cl::Hidden, cl::init(true),
+                cl::desc("Use the scoring mechanism to reassociate"));
+static cl::opt<bool> MakeSingleUseOpt(
+    DEBUG_TYPE "-make-single-use", cl::Hidden, cl::init(false),
+    cl::desc("Duplicate instructions to make them single use"));
 
 #ifndef NDEBUG
 /// Print out the expression identified in the Ops list.
@@ -153,12 +161,17 @@ static bool hasFPAssociativeFlags(Instruction *I) {
 
 /// Return true if V is an instruction of the specified opcode and if it
 /// only has one use.
-static BinaryOperator *isReassociableOp(Value *V, unsigned Opcode) {
+static BinaryOperator *isReassociableOpImpl(Value *V, unsigned Opcode,
+                                            bool SkipOneUseCheck) {
   auto *BO = dyn_cast<BinaryOperator>(V);
-  if (BO && BO->hasOneUse() && BO->getOpcode() == Opcode)
+  if (BO && (BO->hasOneUse() || SkipOneUseCheck) && BO->getOpcode() == Opcode)
     if (!isa<FPMathOperator>(BO) || hasFPAssociativeFlags(BO))
       return BO;
   return nullptr;
+}
+
+static BinaryOperator *isReassociableOp(Value *V, unsigned Opcode) {
+  return isReassociableOpImpl(V, Opcode, false);
 }
 
 static BinaryOperator *isReassociableOp(Value *V, unsigned Opcode1,
@@ -703,7 +716,7 @@ void ReassociatePass::RewriteExprTree(BinaryOperator *I,
 
       if (NewLHS == OldRHS && NewRHS == OldLHS) {
         // The order of the operands was reversed.  Swap them.
-        LLVM_DEBUG(dbgs() << "RA: " << *Op << '\n');
+        LLVM_DEBUG(dbgs() << "RA1: " << *Op << '\n');
         Op->swapOperands();
         LLVM_DEBUG(dbgs() << "TO: " << *Op << '\n');
         MadeChange = true;
@@ -713,7 +726,7 @@ void ReassociatePass::RewriteExprTree(BinaryOperator *I,
 
       // The new operation differs non-trivially from the original. Overwrite
       // the old operands with the new ones.
-      LLVM_DEBUG(dbgs() << "RA: " << *Op << '\n');
+      LLVM_DEBUG(dbgs() << "RA2: " << *Op << '\n');
       if (NewLHS != OldLHS) {
         BinaryOperator *BO = isReassociableOp(OldLHS, Opcode);
         if (BO && !NotRewritable.count(BO))
@@ -739,7 +752,7 @@ void ReassociatePass::RewriteExprTree(BinaryOperator *I,
     // while the right-hand side will be the current element of Ops.
     Value *NewRHS = Ops[i].Op;
     if (NewRHS != Op->getOperand(1)) {
-      LLVM_DEBUG(dbgs() << "RA: " << *Op << '\n');
+      LLVM_DEBUG(dbgs() << "RA3: " << *Op << '\n');
       if (NewRHS == Op->getOperand(0)) {
         // The new right-hand side was already present as the left operand.  If
         // we are lucky then swapping the operands will sort out both of them.
@@ -784,7 +797,7 @@ void ReassociatePass::RewriteExprTree(BinaryOperator *I,
       NewOp = NodesToRewrite.pop_back_val();
     }
 
-    LLVM_DEBUG(dbgs() << "RA: " << *Op << '\n');
+    LLVM_DEBUG(dbgs() << "RA4: " << *Op << '\n');
     Op->setOperand(0, NewOp);
     LLVM_DEBUG(dbgs() << "TO: " << *Op << '\n');
     ExpressionChanged = Op;
@@ -1002,6 +1015,29 @@ static bool shouldConvertOrWithNoCommonBitsToAdd(Instruction *Or) {
   return false;
 }
 
+static void makeSingleUseInstIfReassociable(Instruction &I) {
+  if (!MakeSingleUseOpt)
+    return;
+  if (isReassociableOp(&I, I.getOpcode()))
+    return;
+  if (!isReassociableOpImpl(&I, I.getOpcode(), /*SkipOneUseCheck=*/true))
+    return;
+  // Duplicate the instruction for each use to create one use instruction.
+  // Essentially undo CSE to allow reassociation.
+  bool isFirst = true;
+  for (Use &U : llvm::make_early_inc_range(I.uses())) {
+    if (isFirst) {
+      isFirst = false;
+      continue;
+    }
+    Instruction *ClonedI = I.clone();
+    ClonedI->insertAfter(&I);
+    U.getUser()->setOperand(U.getOperandNo(), ClonedI);
+    LLVM_DEBUG(dbgs() << "Cloned"
+                      << "\n");
+  }
+}
+
 /// If we have (X|Y), and iff X and Y have no common bits set,
 /// transform this into (X+Y) to allow arithmetics reassociation.
 static BinaryOperator *convertOrWithNoCommonBitsToAdd(Instruction *Or) {
@@ -1015,6 +1051,10 @@ static BinaryOperator *convertOrWithNoCommonBitsToAdd(Instruction *Or) {
   // Everyone now refers to the add instruction.
   Or->replaceAllUsesWith(New);
   New->setDebugLoc(Or->getDebugLoc());
+  if (auto *Opd = dyn_cast<Instruction>(Or->getOperand(0)))
+    makeSingleUseInstIfReassociable(*Opd);
+  if (auto *Opd = dyn_cast<Instruction>(Or->getOperand(1)))
+    makeSingleUseInstIfReassociable(*Opd);
 
   LLVM_DEBUG(dbgs() << "Converted or into an add: " << *New << '\n');
   return New;
@@ -2429,7 +2469,10 @@ void ReassociatePass::ReassociateExpression(BinaryOperator *I) {
         }
 
         unsigned MaxRank = std::max(Ops[i].Rank, Ops[j].Rank);
-        if (Score > Max || (Score == Max && MaxRank < BestRank)) {
+        // Skip the scroring mechanism as it will be completely skewed with the
+        // duplicated uses.
+        if ((UseScoreOpt && Score > Max) ||
+            ((!UseScoreOpt || Score == Max) && MaxRank < BestRank)) {
           BestPair = {i, j};
           Max = Score;
           BestRank = MaxRank;
@@ -2519,6 +2562,13 @@ PreservedAnalyses ReassociatePass::run(Function &F, FunctionAnalysisManager &) {
 
   // Calculate the rank map for F.
   BuildRankMap(F, RPOT);
+
+  // duplicate instruction with several uses.
+  for (BasicBlock &BB : F) {
+    for (Instruction &I : llvm::make_early_inc_range(BB)) {
+      makeSingleUseInstIfReassociable(I);
+    }
+  }
 
   // Build the pair map before running reassociate.
   // Technically this would be more accurate if we did it after one round
