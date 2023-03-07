@@ -401,15 +401,51 @@ void LoopPipelinerInternal::createKernel(
     int64_t useStage = stages[op];
     auto *newOp = rewriter.clone(*op, mapping);
 
-    // Within the kernel body, update uses of the induction variable, uses of
-    // the original iter args, and uses of cross stage values.
-    updateInductionVariableUses(rewriter, forOp.getLoc(), newOp,
-                                newForOp.getInductionVar(), maxStage,
-                                stages[op], step);
-    updateIterArgUses(rewriter, mapping, newOp, forOp, newForOp, useStage,
-                      stages);
-    updateCrossStageUses(rewriter, newOp, mapping, newForOp, useStage, stages,
-                         loopArgMap);
+    for (OpOperand &operand : op->getOpOperands()) {
+      // Special case for the induction variable uses. We replace it with a
+      // version incremented based on the stage where it is used.
+      if (operand.get() == forOp.getInductionVar()) {
+        rewriter.setInsertionPoint(newOp);
+        Value offset = rewriter.create<arith::ConstantIndexOp>(
+            forOp.getLoc(), (maxStage - stages[op]) * step);
+        Value iv = rewriter.create<arith::AddIOp>(
+            forOp.getLoc(), newForOp.getInductionVar(), offset);
+        newOp->setOperand(operand.getOperandNumber(), iv);
+        rewriter.setInsertionPointAfter(newOp);
+        continue;
+      }
+      auto arg = operand.get().dyn_cast<BlockArgument>();
+      if (arg && arg.getOwner() == forOp.getBody()) {
+        // If the value is a loop carried value coming from stage N + 1 remap,
+        // it will become a direct use.
+        Value ret = forOp.getBody()->getTerminator()->getOperand(
+            arg.getArgNumber() - 1);
+        Operation *dep = ret.getDefiningOp();
+        if (!dep)
+          continue;
+        auto stageDep = stages.find(dep);
+        if (stageDep == stages.end() || stageDep->second == useStage)
+          continue;
+        assert(stageDep->second == useStage + 1);
+        newOp->setOperand(operand.getOperandNumber(),
+                          mapping.lookupOrDefault(ret));
+        continue;
+      }
+      // For operands defined in a previous stage we need to remap it to use
+      // the correct region argument. We look for the right version of the
+      // Value based on the stage where it is used.
+      Operation *def = operand.get().getDefiningOp();
+      if (!def)
+        continue;
+      auto stageDef = stages.find(def);
+      if (stageDef == stages.end() || stageDef->second == useStage)
+        continue;
+      auto remap = loopArgMap.find(
+          std::make_pair(operand.get(), useStage - stageDef->second));
+      assert(remap != loopArgMap.end());
+      newOp->setOperand(operand.getOperandNumber(),
+                        newForOp.getRegionIterArgs()[remap->second]);
+    }
 
     if (predicates[useStage]) {
       newOp = predicateFn(newOp, predicates[useStage], rewriter);
