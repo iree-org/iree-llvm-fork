@@ -56,12 +56,27 @@ LogicalResult detail::verifyDestinationStyleOpInterface(Operation *op) {
 
   for (OpOperand *opOperand : outputTensorOperands) {
     OpResult result = dstStyleOp.getTiedOpResult(opOperand);
-    if (result.getType() != opOperand->get().getType())
+    if (result.getType().cast<ShapedType>().getShape().size() !=
+        opOperand->get().getType().cast<ShapedType>().getShape().size()) {
       return op->emitOpError("expected type of operand #")
              << opOperand->getOperandNumber() << " ("
              << opOperand->get().getType() << ")"
              << " to match type of corresponding result (" << result.getType()
              << ")";
+    }
+    for (auto [resD, opD] : llvm::zip_equal(
+      result.getType().cast<ShapedType>().getShape(),
+      opOperand->get().getType().cast<ShapedType>().getShape())) {
+        if (resD == opD || resD == ShapedType::kDynamic ||
+            opD == ShapedType::kDynamic)
+          continue;
+        return op->emitOpError("expected type of operand #")
+               << opOperand->getOperandNumber() << " ("
+               << opOperand->get().getType() << ")"
+               << " to match type of corresponding result (" << result.getType()
+               << ")";
+    }
   }
+
   return success();
 }
