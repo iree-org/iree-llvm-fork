@@ -401,7 +401,9 @@ mlir::computeRankReductionMask(ArrayRef<int64_t> originalShape,
   for (unsigned originalIdx = 0; originalIdx < originalRank; ++originalIdx) {
     // Greedily insert `originalIdx` if match.
     if (reducedIdx < reducedRank &&
-        originalShape[originalIdx] == reducedShape[reducedIdx]) {
+        (originalShape[originalIdx] == reducedShape[reducedIdx] ||
+         originalShape[originalIdx] == ShapedType::kDynamic ||
+         reducedShape[reducedIdx] == ShapedType::kDynamic)) {
       reducedIdx++;
       continue;
     }
