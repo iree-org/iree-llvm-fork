@@ -17,13 +17,16 @@ using namespace mlir;
 
 /// Create an LLVMTypeConverter using default LowerToLLVMOptions.
 LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
-                                     const DataLayoutAnalysis *analysis)
-    : LLVMTypeConverter(ctx, LowerToLLVMOptions(ctx), analysis) {}
+                                     const DataLayoutAnalysis *analysis,
+                                     bool convertIndexTypeOpt)
+    : LLVMTypeConverter(ctx, LowerToLLVMOptions(ctx), analysis,
+                        convertIndexTypeOpt) {}
 
 /// Create an LLVMTypeConverter using custom LowerToLLVMOptions.
 LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
                                      const LowerToLLVMOptions &options,
-                                     const DataLayoutAnalysis *analysis)
+                                     const DataLayoutAnalysis *analysis,
+                                     bool convertIndexTypeOpt)
     : llvmDialect(ctx->getOrLoadDialect<LLVM::LLVMDialect>()), options(options),
       dataLayoutAnalysis(analysis) {
   assert(llvmDialect && "LLVM IR dialect is not registered");
@@ -32,7 +35,8 @@ LLVMTypeConverter::LLVMTypeConverter(MLIRContext *ctx,
   addConversion([&](ComplexType type) { return convertComplexType(type); });
   addConversion([&](FloatType type) { return convertFloatType(type); });
   addConversion([&](FunctionType type) { return convertFunctionType(type); });
-  addConversion([&](IndexType type) { return convertIndexType(type); });
+  if (convertIndexTypeOpt)
+    addConversion([&](IndexType type) { return convertIndexType(type); });
   addConversion([&](IntegerType type) { return convertIntegerType(type); });
   addConversion([&](MemRefType type) { return convertMemRefType(type); });
   addConversion(
