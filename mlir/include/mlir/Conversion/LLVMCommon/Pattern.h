@@ -75,6 +75,9 @@ protected:
                              ValueRange indices,
                              ConversionPatternRewriter &rewriter) const;
 
+  Value getStridedElementPtrViaAffineApply(Location loc, MemRefType type, Value memRefDesc,
+                             ValueRange indices,
+                             ConversionPatternRewriter &rewriter) const;
   /// Returns if the given memref has identity maps and the element type is
   /// convertible to LLVM.
   bool isConvertibleAndHasIdentityMaps(MemRefType type) const;

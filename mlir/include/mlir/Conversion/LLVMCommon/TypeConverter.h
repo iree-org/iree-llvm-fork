@@ -42,12 +42,14 @@ public:
   /// Create an LLVMTypeConverter using the default LowerToLLVMOptions.
   /// Optionally takes a data layout analysis to use in conversions.
   LLVMTypeConverter(MLIRContext *ctx,
-                    const DataLayoutAnalysis *analysis = nullptr);
+                    const DataLayoutAnalysis *analysis = nullptr,
+                    bool convertIndexType = true);
 
   /// Create an LLVMTypeConverter using custom LowerToLLVMOptions. Optionally
   /// takes a data layout analysis to use in conversions.
   LLVMTypeConverter(MLIRContext *ctx, const LowerToLLVMOptions &options,
-                    const DataLayoutAnalysis *analysis = nullptr);
+                    const DataLayoutAnalysis *analysis = nullptr,
+                    bool convertIndexTypeOpt = true);
 
   /// Convert a function type.  The arguments and results are converted one by
   /// one and results are packed into a wrapped LLVM IR structure type. `result`

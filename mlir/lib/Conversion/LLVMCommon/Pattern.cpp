@@ -13,6 +13,10 @@
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BuiltinAttributes.h"
 
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
+
 using namespace mlir;
 
 //===----------------------------------------------------------------------===//
@@ -63,6 +67,58 @@ Value ConvertToLLVMPattern::createIndexAttrConstant(OpBuilder &builder,
 Value ConvertToLLVMPattern::createIndexConstant(
     ConversionPatternRewriter &builder, Location loc, uint64_t value) const {
   return createIndexAttrConstant(builder, loc, getIndexType(), value);
+}
+
+Value ConvertToLLVMPattern::getStridedElementPtrViaAffineApply(
+    Location loc, MemRefType type, Value memRefDesc, ValueRange indices,
+    ConversionPatternRewriter &rewriter) const {
+  auto [strides, offset] = getStridesAndOffset(type);
+
+  MemRefDescriptor memRefDescriptor(memRefDesc);
+  Value base = memRefDescriptor.alignedPtr(rewriter, loc);
+
+  // Hold the affine symbols and values for the computation of the offset.
+  SmallVector<OpFoldResult> values(indices.size() * 2 + 1);
+  SmallVector<AffineExpr> symbols(indices.size() * 2 + 1);
+
+  detail::bindSymbolsList(rewriter.getContext(), symbols);
+  AffineExpr expr = symbols.front();
+  values[0] = ShapedType::isDynamic(offset)
+                  ? getAsOpFoldResult(memRefDescriptor.offset(rewriter, loc))
+                  : rewriter.getIndexAttr(offset);
+
+  for (int i = 0, e = indices.size(); i < e; ++i) {
+    Value increment = indices[i];
+    OpFoldResult stride =
+        ShapedType::isDynamic(strides[i])
+            ? getAsOpFoldResult(memRefDescriptor.stride(rewriter, loc, i))
+            : rewriter.getIndexAttr(strides[i]);
+    // Build up the computation of the offset.
+    unsigned baseIdxForDim = 1 + 2 * i;
+    unsigned offsetForDim = baseIdxForDim;
+    unsigned strideForDim = baseIdxForDim + 1;
+    expr = expr + symbols[offsetForDim] * symbols[strideForDim];
+    values[offsetForDim] = increment;
+    values[strideForDim] = stride;
+  }
+
+  // Compute the offset.
+  OpFoldResult finalOffset =
+      makeComposedFoldedAffineApply(rewriter, loc, expr, values);
+  Value finalOffsetVal =
+      getValueOrCreateConstantIndexOp(rewriter, loc, finalOffset);
+  Value castedFinalOffset = rewriter.create<UnrealizedConversionCastOp>(
+      loc, getTypeConverter()->convertType(finalOffsetVal.getType()),
+      finalOffsetVal).getResult(0);
+
+  // TODO, breakdown the gep as well and put the scaling factor
+  // in the affine expression.
+  Type elementPtrType = memRefDescriptor.getElementPtrType();
+  return index ? rewriter.create<LLVM::GEPOp>(
+                     loc, elementPtrType,
+                     getTypeConverter()->convertType(type.getElementType()),
+                     base, castedFinalOffset)
+               : base;
 }
 
 Value ConvertToLLVMPattern::getStridedElementPtr(
