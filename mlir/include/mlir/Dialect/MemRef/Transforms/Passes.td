@@ -202,5 +202,15 @@ def ExpandStridedMetadata : Pass<"expand-strided-metadata"> {
       "AffineDialect", "memref::MemRefDialect"
   ];
 }
+def RewriteAddressComputation : Pass<"rewrite-address-computation"> {
+  let summary = "TODO";
+  let description = [{
+      TODO
+  }];
+  let constructor = "mlir::memref::createRewriteAddressComputationPass()";
+  let dependentDialects = [
+      "AffineDialect", "memref::MemRefDialect"
+  ];
+}
 #endif // MLIR_DIALECT_MEMREF_TRANSFORMS_PASSES
 

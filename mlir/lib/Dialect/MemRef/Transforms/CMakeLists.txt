@@ -8,6 +8,7 @@ add_mlir_dialect_library(MLIRMemRefTransforms
   MultiBuffer.cpp
   NormalizeMemRefs.cpp
   ResolveShapedTypeResultDims.cpp
+  RewriteAddressComputation.cpp
   RuntimeOpVerification.cpp
 
   ADDITIONAL_HEADER_DIRS

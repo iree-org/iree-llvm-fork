@@ -148,6 +148,9 @@ std::unique_ptr<Pass> createResolveShapedTypeResultDimsPass();
 /// easier to reason about operations.
 std::unique_ptr<Pass> createExpandStridedMetadataPass();
 
+/// TODO
+std::unique_ptr<Pass> createRewriteAddressComputationPass();
+
 //===----------------------------------------------------------------------===//
 // Registration
 //===----------------------------------------------------------------------===//
