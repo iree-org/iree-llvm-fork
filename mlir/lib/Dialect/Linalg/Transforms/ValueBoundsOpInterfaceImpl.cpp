@@ -10,6 +10,7 @@
 
 #include "mlir/Dialect/Affine/Analysis/AffineStructures.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/Transforms/ValueBoundsOpInterface.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -247,6 +248,51 @@ struct SubViewOpInterface
 
 } // namespace
 } // namespace memref
+
+namespace arith {
+namespace {
+
+struct AddIOpInterface
+    : public ValueBoundsOpInterface::ExternalModel<AddIOpInterface, AddIOp> {
+  void populateBoundsForIndexValue(Operation *op, Value value,
+                                   ValueBoundsConstraintSet &cstr) const {
+    auto addIOp = cast<AddIOp>(op);
+    assert(value == addIOp.getResult() && "invalid value");
+
+    cstr.addBound(IntegerPolyhedron::BoundType::EQ, value,
+                  cstr.getExpr(addIOp.getLhs()) +
+                      cstr.getExpr(addIOp.getRhs()));
+  }
+};
+
+struct SubIOpInterface
+    : public ValueBoundsOpInterface::ExternalModel<SubIOpInterface, SubIOp> {
+  void populateBoundsForIndexValue(Operation *op, Value value,
+                                   ValueBoundsConstraintSet &cstr) const {
+    auto subIOp = cast<SubIOp>(op);
+    assert(value == subIOp.getResult() && "invalid value");
+
+    cstr.addBound(IntegerPolyhedron::BoundType::EQ, value,
+                  cstr.getExpr(subIOp.getLhs()) -
+                      cstr.getExpr(subIOp.getRhs()));
+  }
+};
+
+struct MulIOpInterface
+    : public ValueBoundsOpInterface::ExternalModel<MulIOpInterface, MulIOp> {
+  void populateBoundsForIndexValue(Operation *op, Value value,
+                                   ValueBoundsConstraintSet &cstr) const {
+    auto mulIOp = cast<MulIOp>(op);
+    assert(value == mulIOp.getResult() && "invalid value");
+
+    cstr.addBound(IntegerPolyhedron::BoundType::EQ, value,
+                  cstr.getExpr(mulIOp.getLhs()) *
+                      cstr.getExpr(mulIOp.getRhs()));
+  }
+};
+
+} // namespace
+} // namespace arith
 } // namespace mlir
 
 void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
@@ -279,5 +325,11 @@ void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
     memref::GetGlobalOp::attachInterface<memref::GetGlobalOpInterface>(*ctx);
     memref::RankOp::attachInterface<memref::RankOpInterface>(*ctx);
     memref::SubViewOp::attachInterface<memref::SubViewOpInterface>(*ctx);
+  });
+
+  registry.addExtension(+[](MLIRContext *ctx, arith::ArithDialect *dialect) {
+    arith::AddIOp::attachInterface<arith::AddIOpInterface>(*ctx);
+    arith::SubIOp::attachInterface<arith::SubIOpInterface>(*ctx);
+    arith::MulIOp::attachInterface<arith::MulIOpInterface>(*ctx);
   });
 }

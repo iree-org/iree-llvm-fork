@@ -235,3 +235,45 @@ func.func @memref_subview(%m: memref<?xf32>, %sz: index) -> index {
   %1 = "test.reify_bound"(%0) {dim = 0} : (memref<?xf32, strided<[1], offset: 2>>) -> (index)
   return %1 : index
 }
+
+// -----
+
+// CHECK: #[[$map]] = affine_map<()[s0] -> (s0 + 5)>
+// CHECK-LABEL: func @arith_addi(
+//  CHECK-SAME:     %[[a:.*]]: index
+//       CHECK:   %[[apply:.*]] = affine.apply #[[$map]]()[%[[a]]]
+//       CHECK:   return %[[apply]]
+func.func @arith_addi(%a: index) -> index {
+  %0 = arith.constant 5 : index
+  %1 = arith.addi %0, %a : index
+  %2 = "test.reify_bound"(%1) : (index) -> (index)
+  return %2 : index
+}
+
+// -----
+
+// CHECK: #[[$map]] = affine_map<()[s0] -> (-s0 + 5)>
+// CHECK-LABEL: func @arith_subi(
+//  CHECK-SAME:     %[[a:.*]]: index
+//       CHECK:   %[[apply:.*]] = affine.apply #[[$map]]()[%[[a]]]
+//       CHECK:   return %[[apply]]
+func.func @arith_subi(%a: index) -> index {
+  %0 = arith.constant 5 : index
+  %1 = arith.subi %0, %a : index
+  %2 = "test.reify_bound"(%1) : (index) -> (index)
+  return %2 : index
+}
+
+// -----
+
+// CHECK: #[[$map]] = affine_map<()[s0] -> (s0 * 5)>
+// CHECK-LABEL: func @arith_muli(
+//  CHECK-SAME:     %[[a:.*]]: index
+//       CHECK:   %[[apply:.*]] = affine.apply #[[$map]]()[%[[a]]]
+//       CHECK:   return %[[apply]]
+func.func @arith_muli(%a: index) -> index {
+  %0 = arith.constant 5 : index
+  %1 = arith.muli %0, %a : index
+  %2 = "test.reify_bound"(%1) : (index) -> (index)
+  return %2 : index
+}
