@@ -214,10 +214,6 @@ FailureOr<OpFoldResult> ValueBoundsConstraintSet::reifyBound(
   assertValidValueDim(value, dim);
 #endif // NDEBUG
 
-  // Only EQ bounds are supported at the moment.
-  assert(type == presburger::IntegerPolyhedron::BoundType::EQ &&
-         "unsupported bound type");
-
   // Process the backward slice of `value` (i.e., reverse use-def chain) until
   // `stopCondition` is met.
   ValueBoundsConstraintSet cstr(std::make_pair(value, dim));
@@ -246,15 +242,31 @@ FailureOr<OpFoldResult> ValueBoundsConstraintSet::reifyBound(
   SmallVector<AffineMap> lb(1), ub(1);
   cstr.cstr.getSliceBounds(pos, 1, b.getContext(), &lb, &ub,
                            /*getClosedUB=*/true);
+
   // Note: There are TODOs in the implementation of `getSliceBounds`. In such a
   // case, no lower/upper bound can be computed at the moment.
-  if (lb.empty() || !lb[0] || ub.empty() || !ub[0] ||
-      lb[0].getNumResults() != 1 || ub[0].getNumResults() != 1)
+  // EQ, UB bounds: upper bound is needed.
+  if ((type != presburger::IntegerPolyhedron::BoundType::LB) &&
+      (ub.empty() || !ub[0] || ub[0].getNumResults() != 1))
+    return failure();
+  // EQ, LB bounds: lower bound is needed.
+  if ((type != presburger::IntegerPolyhedron::BoundType::UB) &&
+      (lb.empty() || !lb[0] || lb[0].getNumResults() != 1))
     return failure();
 
-  // Look for same lower and upper bound: EQ bound.
-  if (ub[0] != lb[0])
+  // EQ bound: lower and upper bound must match.
+  if (type == presburger::IntegerPolyhedron::BoundType::EQ && ub[0] != lb[0])
     return failure();
+
+  AffineMap bound;
+  if (type == presburger::IntegerPolyhedron::BoundType::EQ ||
+      type == presburger::IntegerPolyhedron::BoundType::LB) {
+    bound = lb[0];
+  } else {
+    // Computed UB is a closed bound. Turn into an open bound.
+    bound = AffineMap::get(ub[0].getNumDims(), ub[0].getNumSymbols(),
+                           ub[0].getResult(0) + 1);
+  }
 
   // Gather all SSA values that are used in the computed bound.
   SmallVector<Value> operands;
@@ -268,10 +280,10 @@ FailureOr<OpFoldResult> ValueBoundsConstraintSet::reifyBound(
     // be included in the generated affine.apply op.
     bool used = false;
     if (i < cstr.cstr.getNumDimVars()) {
-      if (lb[0].isFunctionOfDim(i))
+      if (bound.isFunctionOfDim(i))
         used = true;
     } else {
-      if (lb[0].isFunctionOfSymbol(i - cstr.cstr.getNumDimVars()))
+      if (bound.isFunctionOfSymbol(i - cstr.cstr.getNumDimVars()))
         used = true;
     }
 
@@ -305,20 +317,20 @@ FailureOr<OpFoldResult> ValueBoundsConstraintSet::reifyBound(
     }
   }
 
-  mlir::canonicalizeMapAndOperands(&lb[0], &operands);
+  mlir::canonicalizeMapAndOperands(&bound, &operands);
   // Check for special cases where no affine.apply op is needed.
-  if (lb[0].isSingleConstant()) {
+  if (bound.isSingleConstant()) {
     // Bound is a constant: return an IntegerAttr.
     return static_cast<OpFoldResult>(
-        b.getIndexAttr(lb[0].getSingleConstantResult()));
+        b.getIndexAttr(bound.getSingleConstantResult()));
   }
   // No affine.apply op is needed if the bound is a single SSA value.
-  if (auto expr = lb[0].getResult(0).dyn_cast<AffineDimExpr>())
+  if (auto expr = bound.getResult(0).dyn_cast<AffineDimExpr>())
     return static_cast<OpFoldResult>(operands[expr.getPosition()]);
-  if (auto expr = lb[0].getResult(0).dyn_cast<AffineSymbolExpr>())
+  if (auto expr = bound.getResult(0).dyn_cast<AffineSymbolExpr>())
     return static_cast<OpFoldResult>(
         operands[expr.getPosition() + cstr.cstr.getNumDimVars() - 1]);
   // General case: build affine.apply op.
   return static_cast<OpFoldResult>(
-      b.create<AffineApplyOp>(loc, lb[0], operands).getResult());
+      b.create<AffineApplyOp>(loc, bound, operands).getResult());
 }

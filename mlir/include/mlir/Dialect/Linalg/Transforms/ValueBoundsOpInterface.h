@@ -28,14 +28,16 @@ namespace linalg {
 class ValueBoundsConstraintSet {
 public:
   /// Reify a bound for the given index-typed value or shape dimension size in
-  /// terms of the owning op's operands.
+  /// terms of the owning op's operands. LB and EQ bounds are closed, UB bounds
+  /// are open.
   static FailureOr<OpFoldResult>
   reifyBound(OpBuilder &b, Location loc,
              presburger::IntegerPolyhedron::BoundType type, Value value,
              int64_t dim = kIndexValue);
 
   /// Reify a bound for the given index-typed value or shape dimension size in
-  /// terms of SSA values for which `stopCondition` is met.
+  /// terms of SSA values for which `stopCondition` is met. LB and EQ bounds are
+  /// closed, UB bounds are open.
   static FailureOr<OpFoldResult>
   reifyBound(OpBuilder &b, Location loc,
              presburger::IntegerPolyhedron::BoundType type, Value value,

@@ -224,6 +224,17 @@ static void applyEraseUnnecessaryInputs(func::FuncOp funcOp) {
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
+FailureOr<presburger::IntegerPolyhedron::BoundType>
+parseBoundType(std::string type) {
+  if (type == "EQ")
+    return presburger::IntegerPolyhedron::BoundType::EQ;
+  if (type == "LB")
+    return presburger::IntegerPolyhedron::BoundType::LB;
+  if (type == "UB")
+    return presburger::IntegerPolyhedron::BoundType::UB;
+  return failure();
+}
+
 static LogicalResult reifyValueBounds(func::FuncOp funcOp,
                                       bool reifyToFuncArgs) {
   IRRewriter rewriter(funcOp.getContext());
@@ -242,6 +253,15 @@ static LogicalResult reifyValueBounds(func::FuncOp funcOp,
         op->emitOpError("invalid op");
         return WalkResult::skip();
       }
+      std::string boundTypeStr = "EQ";
+      if (auto boundTypeAttr = op->getAttrOfType<StringAttr>("type"))
+        boundTypeStr = boundTypeAttr.str();
+      auto boundType = parseBoundType(boundTypeStr);
+      if (failed(boundType)) {
+        op->emitOpError("invalid op");
+        return WalkResult::interrupt();
+      }
+
       int64_t dim = value.getType().isIndex()
                         ? ValueBoundsConstraintSet::kIndexValue
                         : op->getAttrOfType<IntegerAttr>("dim").getInt();
@@ -249,9 +269,8 @@ static LogicalResult reifyValueBounds(func::FuncOp funcOp,
       rewriter.setInsertionPointAfterValue(value);
       FailureOr<OpFoldResult> reified;
       if (!reifyToFuncArgs) {
-        reified = ValueBoundsConstraintSet::reifyBound(
-            rewriter, op->getLoc(),
-            presburger::IntegerPolyhedron::BoundType::EQ, value, dim);
+        reified = ValueBoundsConstraintSet::reifyBound(rewriter, op->getLoc(),
+                                                       *boundType, value, dim);
       } else {
         auto stopCondition = [](Value v) {
           auto bbArg = v.dyn_cast<BlockArgument>();
@@ -261,9 +280,7 @@ static LogicalResult reifyValueBounds(func::FuncOp funcOp,
               bbArg.getParentBlock()->getParentOp());
         };
         reified = ValueBoundsConstraintSet::reifyBound(
-            rewriter, op->getLoc(),
-            presburger::IntegerPolyhedron::BoundType::EQ, value, dim,
-            stopCondition);
+            rewriter, op->getLoc(), *boundType, value, dim, stopCondition);
       }
       if (failed(reified)) {
         op->emitOpError("could not reify bound");
