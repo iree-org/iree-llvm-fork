@@ -13,6 +13,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/Transforms/ValueBoundsOpInterface.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
 using namespace mlir;
@@ -336,6 +337,35 @@ struct MulIOpInterface
 
 } // namespace
 } // namespace arith
+
+namespace scf {
+namespace {
+
+struct ForOpInterface
+    : public ValueBoundsOpInterface::ExternalModel<ForOpInterface, ForOp> {
+  void populateBoundsForIndexValue(Operation *op, Value value,
+                                   ValueBoundsConstraintSet &cstr) const {
+    auto forOp = cast<ForOp>(op);
+    // Only IV is supported at the moment.
+    if (value != forOp.getInductionVar())
+      return;
+
+    // TODO: Take into account step size.
+    cstr.addBound(IntegerPolyhedron::BoundType::LB, value,
+                  cstr.getExpr(forOp.getLowerBound()));
+    cstr.addBound(IntegerPolyhedron::BoundType::UB, value,
+                  cstr.getExpr(forOp.getUpperBound()));
+  }
+
+  void populateBoundsForShapedValueDim(Operation *op, Value value, int64_t dim,
+                                       ValueBoundsConstraintSet &cstr) const {
+    // iter_arg / return value not supported.
+    return;
+  }
+};
+
+} // namespace
+} // namespace scf
 } // namespace mlir
 
 void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
@@ -376,5 +406,9 @@ void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
     arith::AddIOp::attachInterface<arith::AddIOpInterface>(*ctx);
     arith::SubIOp::attachInterface<arith::SubIOpInterface>(*ctx);
     arith::MulIOp::attachInterface<arith::MulIOpInterface>(*ctx);
+  });
+
+  registry.addExtension(+[](MLIRContext *ctx, scf::SCFDialect *dialect) {
+    scf::ForOp::attachInterface<scf::ForOpInterface>(*ctx);
   });
 }
