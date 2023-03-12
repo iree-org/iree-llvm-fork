@@ -1184,7 +1184,8 @@ static LogicalResult reductionPreconditions(LinalgOp op) {
 
 static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
   // TODO: Masking only supports dynamic generic ops for now.
-  if (!isa<linalg::GenericOp>(op))
+  if (!isa<linalg::GenericOp>(op) &&
+      !isa<linalg::ContractionOpInterface>(op.getOperation()))
     return failure();
 
   // TODO: Index vectorization assumes static shape.
