@@ -11,6 +11,7 @@
 #include "mlir/Dialect/Affine/Analysis/AffineStructures.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Transforms/ValueBoundsOpInterface.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -366,6 +367,21 @@ struct ForOpInterface
 
 } // namespace
 } // namespace scf
+
+namespace linalg {
+namespace {
+
+/// Helper structure that iterates over all LinalgOps in `OpTys` and registers
+/// the `BufferizableOpInterface` with each of them.
+template <typename... Ops>
+struct LinalgValueBoundsOpInterfaceHelper {
+  static void registerOpInterface(MLIRContext *ctx) {
+    (Ops::template attachInterface<DstValueBoundsOpInterfaceExternalModel<Ops>>(*ctx), ...);
+  }
+};
+
+} // namespace
+} // namespace linalg
 } // namespace mlir
 
 void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
@@ -410,5 +426,13 @@ void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
 
   registry.addExtension(+[](MLIRContext *ctx, scf::SCFDialect *dialect) {
     scf::ForOp::attachInterface<scf::ForOpInterface>(*ctx);
+  });
+
+  registry.addExtension(+[](MLIRContext *ctx, linalg::LinalgDialect *dialect) {
+    // Register all Linalg structured ops.
+    LinalgValueBoundsOpInterfaceHelper<
+#define GET_OP_LIST
+#include "mlir/Dialect/Linalg/IR/LinalgStructuredOps.cpp.inc"
+        >::registerOpInterface(ctx);
   });
 }
