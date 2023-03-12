@@ -30,6 +30,8 @@ add_mlir_dialect_library(MLIRLinalgTransforms
   Tiling.cpp
   TilingInterfaceImpl.cpp
   Transforms.cpp
+  ValueBoundsOpInterface.cpp
+  ValueBoundsOpInterfaceImpl.cpp
   Vectorization.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -39,6 +41,7 @@ add_mlir_dialect_library(MLIRLinalgTransforms
   MLIRLinalgPassIncGen
 
   LINK_LIBS PUBLIC
+  MLIRAffineAnalysis
   MLIRAffineDialect
   MLIRAffineUtils
   MLIRAnalysis

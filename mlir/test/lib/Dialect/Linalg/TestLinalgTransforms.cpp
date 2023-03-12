@@ -19,6 +19,7 @@
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+#include "mlir/Dialect/Linalg/Transforms/ValueBoundsOpInterface.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Pass/PassManager.h"
@@ -127,6 +128,12 @@ struct TestLinalgTransforms
       *this, "test-erase-unnecessary-inputs",
       llvm::cl::desc("Test patterns to erase unnecessary inputs"),
       llvm::cl::init(false)};
+  Option<bool> testReifyBounds{*this, "test-refiy-shape-dims",
+                               llvm::cl::desc("Test value bounds reification"),
+                               llvm::cl::init(false)};
+  Option<bool> reifyToFuncArgs{
+      *this, "reify-to-func-args",
+      llvm::cl::desc("Reify in terms of function args"), llvm::cl::init(false)};
 };
 } // namespace
 
@@ -217,6 +224,65 @@ static void applyEraseUnnecessaryInputs(func::FuncOp funcOp) {
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
+static LogicalResult reifyValueBounds(func::FuncOp funcOp,
+                                      bool reifyToFuncArgs) {
+  IRRewriter rewriter(funcOp.getContext());
+  WalkResult result = funcOp.walk([&](Operation *op) {
+    if (op->getName().getStringRef() == "test.reify_bound") {
+      if (op->getNumOperands() != 1 || op->getNumResults() != 1 ||
+          !op->getResultTypes()[0].isIndex()) {
+        op->emitOpError("invalid op");
+        return WalkResult::skip();
+      }
+      Value value = op->getOperand(0);
+      if (value.getType().isa<IndexType>() !=
+          !op->hasAttrOfType<IntegerAttr>("dim")) {
+        // Op should have "dim" attribute if and only if the operand is an
+        // index-typed value.
+        op->emitOpError("invalid op");
+        return WalkResult::skip();
+      }
+      int64_t dim = value.getType().isIndex()
+                        ? ValueBoundsConstraintSet::kIndexValue
+                        : op->getAttrOfType<IntegerAttr>("dim").getInt();
+
+      rewriter.setInsertionPointAfterValue(value);
+      FailureOr<OpFoldResult> reified;
+      if (!reifyToFuncArgs) {
+        reified = ValueBoundsConstraintSet::reifyBound(
+            rewriter, op->getLoc(),
+            presburger::IntegerPolyhedron::BoundType::EQ, value, dim);
+      } else {
+        auto stopCondition = [](Value v) {
+          auto bbArg = v.dyn_cast<BlockArgument>();
+          if (!bbArg)
+            return false;
+          return isa<FunctionOpInterface>(
+              bbArg.getParentBlock()->getParentOp());
+        };
+        reified = ValueBoundsConstraintSet::reifyBound(
+            rewriter, op->getLoc(),
+            presburger::IntegerPolyhedron::BoundType::EQ, value, dim,
+            stopCondition);
+      }
+      if (failed(reified)) {
+        op->emitOpError("could not reify bound");
+        return WalkResult::interrupt();
+      }
+      if (auto val = reified->dyn_cast<Value>()) {
+        rewriter.replaceOp(op, val);
+        return WalkResult::skip();
+      }
+      Value constOp = rewriter.create<arith::ConstantIndexOp>(
+          op->getLoc(), reified->get<Attribute>().cast<IntegerAttr>().getInt());
+      rewriter.replaceOp(op, constOp);
+      return WalkResult::skip();
+    }
+    return WalkResult::advance();
+  });
+  return failure(result.wasInterrupted());
+}
+
 /// Apply transformations specified as patterns.
 void TestLinalgTransforms::runOnOperation() {
   if (testPatterns)
@@ -243,6 +309,9 @@ void TestLinalgTransforms::runOnOperation() {
     return applyEraseUnusedOperandsAndResultsPatterns(getOperation());
   if (testEraseUnnecessaryInputs)
     return applyEraseUnnecessaryInputs(getOperation());
+  if (testReifyBounds)
+    if (failed(reifyValueBounds(getOperation(), reifyToFuncArgs)))
+      return signalPassFailure();
 }
 
 namespace mlir {

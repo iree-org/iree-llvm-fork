@@ -1010,7 +1010,7 @@ void FlatAffineValueConstraints::getSliceBounds(
     unsigned offset, unsigned num, MLIRContext *context,
     SmallVectorImpl<AffineMap> *lbMaps, SmallVectorImpl<AffineMap> *ubMaps,
     bool getClosedUB) {
-  assert(num < getNumDimVars() && "invalid range");
+  assert(offset + num <= getNumDimVars() && "invalid range");
 
   // Basic simplification.
   normalizeConstraintsByGCD();
