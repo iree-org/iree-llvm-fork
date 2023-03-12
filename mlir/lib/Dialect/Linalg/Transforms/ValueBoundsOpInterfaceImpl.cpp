@@ -9,6 +9,7 @@
 #include "mlir/Dialect/Linalg/Transforms/ValueBoundsOpInterfaceImpl.h"
 
 #include "mlir/Dialect/Affine/Analysis/AffineStructures.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Linalg/Transforms/ValueBoundsOpInterface.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 
@@ -117,6 +118,31 @@ struct RankOpInterface
 
 } // namespace
 } // namespace tensor
+
+namespace {
+struct AffineApplyOpInterface
+    : public ValueBoundsOpInterface::ExternalModel<AffineApplyOpInterface,
+                                                   AffineApplyOp> {
+  void populateBoundsForIndexValue(Operation *op, Value value,
+                                   ValueBoundsConstraintSet &cstr) const {
+    auto applyOp = cast<AffineApplyOp>(op);
+    assert(value == applyOp.getResult() && "invalid value");
+    assert(applyOp.getAffineMap().getNumResults() == 1 &&
+           "expected single result");
+
+    // Align affine map result with dims/symbols in the constraint set.
+    AffineExpr expr = applyOp.getAffineMap().getResult(0);
+    SmallVector<AffineExpr> dimReplacements = llvm::to_vector(llvm::map_range(
+        applyOp.getDimOperands(), [&](Value v) { return cstr.getExpr(v); }));
+    SmallVector<AffineExpr> symReplacements = llvm::to_vector(llvm::map_range(
+        applyOp.getSymbolOperands(), [&](Value v) { return cstr.getExpr(v); }));
+    AffineExpr bound =
+        expr.replaceDimsAndSymbols(dimReplacements, symReplacements);
+    cstr.addBound(IntegerPolyhedron::BoundType::EQ, value, bound);
+  };
+};
+} // namespace
+
 } // namespace mlir
 
 void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
@@ -133,5 +159,9 @@ void mlir::linalg::registerValueBoundsOpInterfaceExternalModels(
         DstValueBoundsOpInterfaceExternalModel<tensor::InsertSliceOp>>(*ctx);
     tensor::PadOp::attachInterface<tensor::PadOpInterface>(*ctx);
     tensor::RankOp::attachInterface<tensor::RankOpInterface>(*ctx);
+  });
+
+  registry.addExtension(+[](MLIRContext *ctx, AffineDialect *dialect) {
+    AffineApplyOp::attachInterface<AffineApplyOpInterface>(*ctx);
   });
 }
