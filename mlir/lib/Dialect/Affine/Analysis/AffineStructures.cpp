@@ -920,7 +920,8 @@ static bool detectAsFloorDiv(const FlatAffineValueConstraints &cst,
 std::pair<AffineMap, AffineMap>
 FlatAffineValueConstraints::getLowerAndUpperBound(
     unsigned pos, unsigned offset, unsigned num, unsigned symStartPos,
-    ArrayRef<AffineExpr> localExprs, MLIRContext *context) const {
+    ArrayRef<AffineExpr> localExprs, MLIRContext *context,
+    bool getClosedUB) const {
   assert(pos + offset < getNumDimVars() && "invalid dim start pos");
   assert(symStartPos >= (pos + offset) && "invalid sym start pos");
   assert(getNumLocalVars() == localExprs.size() &&
@@ -970,8 +971,8 @@ FlatAffineValueConstraints::getLowerAndUpperBound(
     auto expr =
         getAffineExprFromFlatForm(ub, dimCount, symCount, localExprs, context);
     expr = expr.floorDiv(std::abs(ineq[pos + offset]));
-    // Upper bound is exclusive.
-    ubExprs.push_back(expr + 1);
+    int64_t ubAdjustment = getClosedUB ? 0 : 1;
+    ubExprs.push_back(expr + ubAdjustment);
   }
 
   // Equalities. It's both a lower and a upper bound.
@@ -1140,7 +1141,8 @@ void FlatAffineValueConstraints::getSliceBounds(
           tmpClone->removeRedundantInequalities();
         }
         std::tie(lbMap, ubMap) = tmpClone->getLowerAndUpperBound(
-            pos, offset, num, getNumDimVars(), /*localExprs=*/{}, context);
+            pos, offset, num, getNumDimVars(), /*localExprs=*/{}, context,
+            getClosedUB);
       }
 
       // If the above fails, we'll just use the constant lower bound and the
