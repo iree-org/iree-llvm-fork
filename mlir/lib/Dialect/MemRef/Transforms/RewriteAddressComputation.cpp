@@ -18,6 +18,9 @@
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "llvm/Support/Debug.h"
 
+// TODO: not the right dependencies
+#include "mlir/Dialect/NVGPU/IR/NVGPUDialect.h"
+
 #define DEBUG_TYPE "rewrite-address-computation"
 
 namespace mlir {
@@ -51,8 +54,15 @@ struct RewriteAddressComputationPass final
 //
 // Ultimately we want to produce an affine map with the address computation.
 // This will be taken care of by the expand-strided-metadata pass.
-static void rewriteLoad(RewriterBase &rewriter, memref::LoadOp loadOp) {
-  MemRefType ldTy = loadOp.getMemRefType();
+template <typename LoadLikeOp>
+static void rewriteLoadLike(
+    RewriterBase &rewriter, LoadLikeOp loadOp,
+    std::function<Value(LoadLikeOp)> getSrcMemRef,
+    std::function<LoadLikeOp(RewriterBase &, LoadLikeOp, Value /*srcMemRef*/,
+                             ArrayRef<Value> /*indices*/)>
+        rebuildOpFromAddressAndIndices) {
+  Value srcMemRef = getSrcMemRef(loadOp);
+  auto ldTy = srcMemRef.getType().cast<MemRefType>();
   unsigned loadRank = ldTy.getRank();
   // Don't waste compile time if there is nothing to rewrite.
   if (loadRank == 0)
@@ -64,15 +74,33 @@ static void rewriteLoad(RewriterBase &rewriter, memref::LoadOp loadOp) {
   SmallVector<OpFoldResult> ones(loadRank, rewriter.getIndexAttr(1));
   Location loc = loadOp.getLoc();
   auto subview = rewriter.create<memref::SubViewOp>(
-      loc, /*source=*/loadOp.getMemRef(),
+      loc, /*source=*/srcMemRef,
       /*offsets=*/getAsOpFoldResult(loadOp.getIndices()),
+      // TODO: Get the right sizes for non-unary loads.
       /*sizes=*/ones, /*strides=*/ones);
   // Rewrite the load with the subview as the base pointer.
   SmallVector<Value> zeros(loadRank,
                            rewriter.create<arith::ConstantIndexOp>(loc, 0));
-  auto newLoad = rewriter.create<memref::LoadOp>(loc, subview.getResult(),
-                                                 /*indices=*/zeros);
+  LoadLikeOp newLoad = rebuildOpFromAddressAndIndices(
+      rewriter, loadOp, subview.getResult(), zeros);
   rewriter.replaceOp(loadOp, newLoad.getResult());
+}
+
+static memref::LoadOp rebuildLoadOp(RewriterBase &rewriter,
+                                    memref::LoadOp loadOp, Value srcMemRef,
+                                    ArrayRef<Value> indices) {
+  Location loc = loadOp.getLoc();
+  return rewriter.create<memref::LoadOp>(loc, srcMemRef, indices);
+}
+
+static nvgpu::LdMatrixOp rebuildLdMatrixOp(RewriterBase &rewriter,
+                                           nvgpu::LdMatrixOp ldMatrixOp,
+                                           Value srcMemRef,
+                                           ArrayRef<Value> indices) {
+  Location loc = ldMatrixOp.getLoc();
+  return rewriter.create<nvgpu::LdMatrixOp>(
+      loc, ldMatrixOp.getResult().getType(), srcMemRef, indices,
+      ldMatrixOp.getTranspose(), ldMatrixOp.getNumTiles());
 }
 
 void RewriteAddressComputationPass::runOnOperation() {
@@ -80,7 +108,19 @@ void RewriteAddressComputationPass::runOnOperation() {
   IRRewriter rewriter(&getContext());
   funcOp->walk([&](memref::LoadOp loadOp) {
     LLVM_DEBUG(llvm::dbgs() << "Found load:\n" << loadOp << '\n');
-    rewriteLoad(rewriter, loadOp);
+    rewriteLoadLike<memref::LoadOp>(
+        rewriter, loadOp,
+        [](memref::LoadOp loadOp) -> Value { return loadOp.getMemRef(); },
+        rebuildLoadOp);
+  });
+  funcOp->walk([&](nvgpu::LdMatrixOp loadOp) {
+    LLVM_DEBUG(llvm::dbgs() << "Found ldmatrix:\n" << loadOp << '\n');
+    rewriteLoadLike<nvgpu::LdMatrixOp>(
+        rewriter, loadOp,
+        [](nvgpu::LdMatrixOp ldMatrixOp) -> Value {
+          return ldMatrixOp.getSrcMemref();
+        },
+        rebuildLdMatrixOp);
   });
 }
 
