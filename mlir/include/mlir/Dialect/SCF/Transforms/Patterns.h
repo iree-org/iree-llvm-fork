@@ -31,6 +31,11 @@ namespace scf {
 /// }
 /// S1(N) S2(N-1)                // Epilogue
 /// S2(N)                        // Epilogue
+
+FailureOr<ForOp> pipelineForLoop(RewriterBase &rewriter, ForOp forOp,
+                                 const PipeliningOption &options);
+
+// TODO: such patterns should be auto-generated.
 class ForLoopPipeliningPattern : public OpRewritePattern<ForOp> {
 public:
   ForLoopPipeliningPattern(const PipeliningOption &options,
@@ -42,7 +47,9 @@ public:
   }
 
   FailureOr<ForOp> returningMatchAndRewrite(ForOp forOp,
-                                            PatternRewriter &rewriter) const;
+                                            PatternRewriter &rewriter) const {
+    return pipelineForLoop(rewriter, forOp, options);
+  }
 
 protected:
   PipeliningOption options;
