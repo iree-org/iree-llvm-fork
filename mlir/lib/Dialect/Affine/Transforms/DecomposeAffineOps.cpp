@@ -15,6 +15,7 @@
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Transforms/Transforms.h"
+#include "mlir/Dialect/Affine/Passes.h"
 #include "mlir/Dialect/Affine/Utils.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/PatternMatch.h"
@@ -28,6 +29,11 @@ using namespace mlir;
 #define DEBUG_TYPE "decompose-affine-ops"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
 #define DBGSNL() (llvm::dbgs() << "\n")
+
+namespace mlir {
+#define GEN_PASS_DEF_DECOMPOSEAFFINE
+#include "mlir/Dialect/Affine/Passes.h.inc"
+} // namespace mlir
 
 /// Count the number of loops surrounding `operand` such that operand could be
 /// hoisted above.
@@ -170,4 +176,27 @@ FailureOr<AffineApplyOp> mlir::decompose(RewriterBase &rewriter,
 
   rewriter.replaceOp(op, current.getResult());
   return current;
+}
+
+namespace {
+
+struct DecomposeAffinePass
+    : public impl::DecomposeAffineBase<DecomposeAffinePass> {
+
+  void runOnOperation() override;
+};
+
+} // namespace
+
+void DecomposeAffinePass::runOnOperation() {
+  IRRewriter rewriter(&getContext());
+  this->getOperation()->walk([&](AffineApplyOp op) {
+    rewriter.setInsertionPoint(op);
+    reorderOperandsByHoistability(rewriter, op);
+    (void)decompose(rewriter, op);
+  });
+}
+
+std::unique_ptr<Pass> mlir::createDecomposeAffinePass() {
+  return std::make_unique<DecomposeAffinePass>();
 }

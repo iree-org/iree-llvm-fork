@@ -407,4 +407,14 @@ def AffineExpandIndexOps : Pass<"affine-expand-index-ops"> {
   let constructor = "mlir::createAffineExpandIndexOpsPass()";
 }
 
+def DecomposeAffine: Pass<"decompose-affine"> {
+  let summary = "TODO";
+  let description = [{
+     TODO
+  }];
+  let constructor = "mlir::createDecomposeAffinePass()";
+  let dependentDialects = [
+      "AffineDialect"
+  ];
+}
 #endif // MLIR_DIALECT_AFFINE_PASSES
