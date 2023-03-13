@@ -21,6 +21,12 @@ func.func @test(%base : memref<2x16x16xf32>, %offset : index) -> f32 {
 
 // -----
 
+func.func @test_ldmatrix(%base : memref<4x32x32xf16, 3>, %offset0 : index, %offset1: index, %offset2: index) -> vector<4x2xf16> {
+  %loaded_val = nvgpu.ldmatrix %base[%offset0, %offset1, %offset2] {numTiles = 4 : i32, transpose = false} : memref<4x32x32xf16, 3> -> vector<4x2xf16>
+  return %loaded_val : vector<4x2xf16>
+}
+// -----
+
 // Note: the scf.for are purposely flipped (dim2 -> dim0 instead of dim0 -> dim2) to
 // make the ordering from the decompose of affine ops more obvious.
 func.func @testWithLoop(%base : memref<?x?x?xf32, strided<[?,?,?], offset: ?>>) -> f32 {
