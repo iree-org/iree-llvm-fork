@@ -77,6 +77,9 @@ static cl::opt<bool>
 static cl::opt<bool> MakeSingleUseOpt(
     DEBUG_TYPE "-make-single-use", cl::Hidden, cl::init(false),
     cl::desc("Duplicate instructions to make them single use"));
+static cl::opt<bool> SkipOpt(
+    DEBUG_TYPE "-skip", cl::Hidden, cl::init(false),
+    cl::desc("Skip the optimization"));
 
 #ifndef NDEBUG
 /// Print out the expression identified in the Ops list.
@@ -2554,7 +2557,8 @@ ReassociatePass::BuildPairMap(ReversePostOrderTraversal<Function *> &RPOT) {
 }
 
 PreservedAnalyses ReassociatePass::run(Function &F, FunctionAnalysisManager &) {
-  return PreservedAnalyses::all();
+  if (SkipOpt)
+    return PreservedAnalyses::all();
   // Get the functions basic blocks in Reverse Post Order. This order is used by
   // BuildRankMap to pre calculate ranks correctly. It also excludes dead basic
   // blocks (it has been seen that the analysis in this pass could hang when
