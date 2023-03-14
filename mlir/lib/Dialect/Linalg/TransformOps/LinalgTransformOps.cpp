@@ -475,8 +475,7 @@ tileAndFuseFirstExtractUse(RewriterBase &rewriter, Diagnostic &diag,
 
   // Replace the extract op.
   auto maybeRankReduced = tensor::ExtractSliceOp::rankReduceIfNeeded(
-      rewriter, sliceOpToTile->getLoc(),
-      tileAndFuseResult->tiledValues[resultNumber],
+      rewriter, sliceOpToTile->getLoc(), tileAndFuseResult->tiledValues[0],
       sliceOpToTile->getResult(0)
           .getType()
           .cast<RankedTensorType>()
