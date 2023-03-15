@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -210,6 +211,14 @@ static Value getMemRefOperand(vector::TransferWriteOp op) {
   return op.getSource();
 }
 
+static Value getMemRefOperand(gpu::SubgroupMmaLoadMatrixOp op) {
+  return op.getSrcMemref();
+}
+
+static Value getMemRefOperand(gpu::SubgroupMmaStoreMatrixOp op) {
+  return op.getDstMemref();
+}
+
 /// Given the permutation map of the original
 /// `vector.transfer_read`/`vector.transfer_write` operations compute the
 /// permutation map to use after the subview is folded with it.
@@ -401,6 +410,11 @@ LogicalResult LoadOpOfSubViewOpFolder<OpTy>::matchAndRewrite(
             transferReadOp.getPadding(),
             /*mask=*/Value(), transferReadOp.getInBoundsAttr());
       })
+      .Case([&](gpu::SubgroupMmaLoadMatrixOp op) {
+        rewriter.replaceOpWithNewOp<gpu::SubgroupMmaLoadMatrixOp>(
+            op, op.getType(), subViewOp.getSource(), sourceIndices,
+            op.getLeadDimension(), op.getTransposeAttr());
+      })
       .Default([](Operation *) { llvm_unreachable("unexpected operation."); });
   return success();
 }
@@ -496,11 +510,11 @@ LogicalResult StoreOpOfSubViewOpFolder<OpTy>::matchAndRewrite(
   llvm::TypeSwitch<Operation *, void>(storeOp)
       .Case([&](AffineStoreOp op) {
         rewriter.replaceOpWithNewOp<AffineStoreOp>(
-            storeOp, storeOp.getValue(), subViewOp.getSource(), sourceIndices);
+            op, op.getValue(), subViewOp.getSource(), sourceIndices);
       })
       .Case([&](memref::StoreOp op) {
         rewriter.replaceOpWithNewOp<memref::StoreOp>(
-            storeOp, storeOp.getValue(), subViewOp.getSource(), sourceIndices,
+            op, op.getValue(), subViewOp.getSource(), sourceIndices,
             op.getNontemporal());
       })
       .Case([&](vector::TransferWriteOp op) {
@@ -509,6 +523,11 @@ LogicalResult StoreOpOfSubViewOpFolder<OpTy>::matchAndRewrite(
             getPermutationMapAttr(rewriter.getContext(), subViewOp,
                                   op.getPermutationMap()),
             op.getInBoundsAttr());
+      })
+      .Case([&](gpu::SubgroupMmaStoreMatrixOp op) {
+        rewriter.replaceOpWithNewOp<gpu::SubgroupMmaStoreMatrixOp>(
+            op, op.getSrc(), subViewOp.getSource(), sourceIndices,
+            op.getLeadDimension(), op.getTransposeAttr());
       })
       .Default([](Operation *) { llvm_unreachable("unexpected operation."); });
   return success();
@@ -584,9 +603,11 @@ void memref::populateFoldMemRefAliasOpPatterns(RewritePatternSet &patterns) {
   patterns.add<LoadOpOfSubViewOpFolder<AffineLoadOp>,
                LoadOpOfSubViewOpFolder<memref::LoadOp>,
                LoadOpOfSubViewOpFolder<vector::TransferReadOp>,
+               LoadOpOfSubViewOpFolder<gpu::SubgroupMmaLoadMatrixOp>,
                StoreOpOfSubViewOpFolder<AffineStoreOp>,
                StoreOpOfSubViewOpFolder<memref::StoreOp>,
                StoreOpOfSubViewOpFolder<vector::TransferWriteOp>,
+               StoreOpOfSubViewOpFolder<gpu::SubgroupMmaStoreMatrixOp>,
                LoadOpOfExpandShapeOpFolder<AffineLoadOp>,
                LoadOpOfExpandShapeOpFolder<memref::LoadOp>,
                StoreOpOfExpandShapeOpFolder<AffineStoreOp>,
