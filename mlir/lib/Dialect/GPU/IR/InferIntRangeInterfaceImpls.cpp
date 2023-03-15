@@ -118,6 +118,11 @@ void LaneIdOp::inferResultRanges(ArrayRef<ConstantIntRanges>,
   setResultRange(getResult(), getIndexRange(0, kMaxSubgroupSize - 1ULL));
 }
 
+void LinearIdOp::inferResultRanges(ArrayRef<ConstantIntRanges>,
+                                   SetIntRangeFn setResultRange) {
+  setResultRange(getResult(), getIndexRange(0, kMaxSubgroupSize - 1ULL));
+}
+
 void SubgroupIdOp::inferResultRanges(ArrayRef<ConstantIntRanges>,
                                      SetIntRangeFn setResultRange) {
   setResultRange(getResult(), getIndexRange(0, kMaxDim - 1ULL));

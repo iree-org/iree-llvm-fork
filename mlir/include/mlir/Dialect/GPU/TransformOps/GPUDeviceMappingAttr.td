@@ -64,6 +64,22 @@ def GPUWarpMappingAttr : GPU_Attr<"GPUWarpMapping", "warp", [
   }];
 }
 
+def LinearIdEnum : I64EnumAttr<"LinearId", "threads for loop mapping", [
+    DimX, DimY, DimZ]> {
+  let cppNamespace = "::mlir::gpu";
+}
+
+def GPULinearIdMapping : GPU_Attr<"GPULinearIdMapping", "linear", [
+  DeclareAttrInterfaceMethods<DeviceMappingAttrInterface> ] >  {
+  let parameters = (ins
+    EnumParameter<LinearIdEnum>:$linear_id
+  );
+  let assemblyFormat = "`<` params `>`";
+  let description = [{
+    An attribute that allows defining thread parallelism for GPU devices.
+  }];
+}
+
 def BlocksEnum : I64EnumAttr<"Blocks", "threads for loop mapping", [
     DimX, DimY, DimZ]> {
   let cppNamespace = "::mlir::gpu";

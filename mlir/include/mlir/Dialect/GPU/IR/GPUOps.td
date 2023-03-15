@@ -114,6 +114,20 @@ def GPU_LaneIdOp : GPU_Op<"lane_id", [
   let assemblyFormat = "attr-dict";
 }
 
+def GPU_LinearIdOp : GPU_Op<"linear_id", [
+      Pure, DeclareOpInterfaceMethods<InferIntRangeInterface>]> {
+  let description = [{
+    Returns the linearized id within the workgroup (block).
+
+    Example:
+    ```mlir
+    %laneId = gpu.lane_id
+    ```
+  }];
+  let results = (outs Index:$result);
+  let assemblyFormat = "attr-dict";
+}
+
 def GPU_SubgroupIdOp : GPU_Op<"subgroup_id", [
       Pure, DeclareOpInterfaceMethods<InferIntRangeInterface>]>,
     Arguments<(ins)>, Results<(outs Index:$result)> {
