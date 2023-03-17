@@ -6916,6 +6916,7 @@ cc_library(
         ":ArithToLLVM",
         ":ArithToSPIRV",
         ":ArithTransforms",
+        ":ArithValueBoundsOpInterfaceImpl",
         ":ArmNeonDialect",
         ":ArmSVEDialect",
         ":ArmSVETransforms",
@@ -8567,6 +8568,18 @@ cc_library(
 )
 
 cc_library(
+    name = "ArithValueBoundsOpInterfaceImpl",
+    srcs = ["lib/Dialect/Arith/IR/ValueBoundsOpInterfaceImpl.cpp"],
+    hdrs = ["include/mlir/Dialect/Arith/IR/ValueBoundsOpInterfaceImpl.h"],
+    includes = ["include"],
+    deps = [
+        ":ArithDialect",
+        ":IR",
+        ":ValueBoundsOpInterface",
+    ],
+)
+
+cc_library(
     name = "TilingInterface",
     srcs = ["lib/Interfaces/TilingInterface.cpp"],
     hdrs = ["include/mlir/Interfaces/TilingInterface.h"],
@@ -9633,8 +9646,9 @@ cc_library(
     name = "ArithDialect",
     srcs = glob(
         [
-            "lib/Dialect/Arith/IR/*.cpp",
-            "lib/Dialect/Arith/IR/*.h",
+            "lib/Dialect/Arith/IR/ArithDialect.cpp",
+            "lib/Dialect/Arith/IR/ArithOps.cpp",
+            "lib/Dialect/Arith/IR/InferIntRangeInterfaceImpls.cpp",
         ],
     ),
     hdrs = [
