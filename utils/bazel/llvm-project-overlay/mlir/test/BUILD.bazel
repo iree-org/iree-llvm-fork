@@ -527,6 +527,7 @@ cc_library(
         "//mlir:SCFDialect",
         "//mlir:Support",
         "//mlir:Transforms",
+        "//mlir:ValueBoundsOpInterface",
         "//mlir:VectorDialect",
         "//mlir:VectorUtils",
     ],
