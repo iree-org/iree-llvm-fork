@@ -14,6 +14,7 @@ set(LLVM_OPTIONAL_SOURCES
   ShapedOpInterfaces.cpp
   SideEffectInterfaces.cpp
   TilingInterface.cpp
+  ValueBoundsOpInterface.cpp
   VectorInterfaces.cpp
   ViewLikeInterface.cpp
   )
@@ -49,6 +50,7 @@ add_mlir_interface_library(RuntimeVerifiableOpInterface)
 add_mlir_interface_library(ShapedOpInterfaces)
 add_mlir_interface_library(SideEffectInterfaces)
 add_mlir_interface_library(TilingInterface)
+add_mlir_interface_library(ValueBoundsOpInterface)
 add_mlir_interface_library(VectorInterfaces)
 add_mlir_interface_library(ViewLikeInterface)
 
