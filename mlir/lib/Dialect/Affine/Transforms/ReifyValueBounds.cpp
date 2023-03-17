@@ -19,17 +19,17 @@ FailureOr<OpFoldResult> mlir::reifyValueBound(OpBuilder &b, Location loc,
                                               presburger::BoundType type,
                                               Value value,
                                               std::optional<int64_t> dim) {
-  auto stopCondition = [&](Value v) {
+  auto stopCondition = [&](Value v, std::optional<int64_t> d) {
     // Reify in terms of SSA values that are different from `value`.
     return v != value;
   };
   return reifyValueBound(b, loc, type, value, dim, stopCondition);
 }
 
-FailureOr<OpFoldResult>
-mlir::reifyValueBound(OpBuilder &b, Location loc, presburger::BoundType type,
-                      Value value, std::optional<int64_t> dim,
-                      function_ref<bool(Value)> stopCondition) {
+FailureOr<OpFoldResult> mlir::reifyValueBound(
+    OpBuilder &b, Location loc, presburger::BoundType type, Value value,
+    std::optional<int64_t> dim,
+    function_ref<bool(Value, std::optional<int64_t>)> stopCondition) {
   // Compute bound.
   AffineMap boundMap;
   ValueDimList mapOperands;

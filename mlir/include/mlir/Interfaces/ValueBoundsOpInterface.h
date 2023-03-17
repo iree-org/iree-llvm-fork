@@ -44,15 +44,26 @@ public:
   /// or a shaped value and a dimension.
   ///
   /// `dim` must be `nullopt` if and only if `value` is index-typed. The bound
-  /// is computed in terms of values for which `stopCondition` evaluates to
-  /// "true". To that end, the backward slice (reverse use-def chain) of the
-  /// given value is visited in a worklist-driven manner and the constraint set
-  /// is populated according to `ValueBoundsOpInterface` for each visited value.
+  /// is computed in terms of values/dimensions for which `stopCondition`
+  /// evaluates to "true". To that end, the backward slice (reverse use-def
+  /// chain) of the given value is visited in a worklist-driven manner and the
+  /// constraint set is populated according to `ValueBoundsOpInterface` for each
+  /// visited value.
+  ///
+  /// Note: `stopCondition` should not evaluate to "true" for the input
+  /// value/dimension.
+  static LogicalResult
+  computeBound(AffineMap &resultMap, ValueDimList &mapOperands,
+               presburger::BoundType type, Value value,
+               std::optional<int64_t> dim,
+               function_ref<bool(Value, std::optional<int64_t>)> stopCondition);
+
+  /// Compute a bound in terms of the values/dimensions in `dependencies`.
   static LogicalResult computeBound(AffineMap &resultMap,
                                     ValueDimList &mapOperands,
                                     presburger::BoundType type, Value value,
                                     std::optional<int64_t> dim,
-                                    function_ref<bool(Value)> stopCondition);
+                                    ValueDimList dependencies);
 
   /// Compute a constant bound for the given index-typed value or shape
   /// dimension size.
@@ -67,10 +78,11 @@ public:
   /// The stop condition is optional: If none is specified, the backward slice
   /// is traversed in a breadth-first manner until a constant bound could be
   /// computed.
-  static FailureOr<int64_t>
-  computeConstantBound(presburger::BoundType type, Value value,
-                       std::optional<int64_t> dim = std::nullopt,
-                       function_ref<bool(Value)> stopCondition = nullptr);
+  static FailureOr<int64_t> computeConstantBound(
+      presburger::BoundType type, Value value,
+      std::optional<int64_t> dim = std::nullopt,
+      function_ref<bool(Value, std::optional<int64_t>)> stopCondition =
+          nullptr);
 
   /// Bound the given index-typed value by the given expression.
   void addBound(presburger::BoundType type, Value value, AffineExpr expr);
@@ -111,7 +123,8 @@ protected:
   /// Iteratively process all elements on the worklist until an index-typed
   /// value or shaped value meets `stopCondition`. Such values are not processed
   /// any further.
-  void processWorklist(function_ref<bool(Value)> stopCondition);
+  void processWorklist(
+      function_ref<bool(Value, std::optional<int64_t>)> stopCondition);
 
   /// Bound the given column in the underlying constraint set by the given
   /// expression.

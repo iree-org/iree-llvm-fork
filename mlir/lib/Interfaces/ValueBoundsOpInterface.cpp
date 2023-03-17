@@ -172,7 +172,7 @@ static Operation *getOwnerOfValue(Value value) {
 }
 
 void ValueBoundsConstraintSet::processWorklist(
-    function_ref<bool(Value)> stopCondition) {
+    function_ref<bool(Value, std::optional<int64_t>)> stopCondition) {
   while (!worklist.empty()) {
     int64_t pos = worklist.front();
     worklist.pop();
@@ -191,7 +191,8 @@ void ValueBoundsConstraintSet::processWorklist(
     }
 
     // Do not process any further if the stop condition is met.
-    if (stopCondition(value))
+    auto maybeDim = dim == kIndexValue ? std::nullopt : std::make_optional(dim);
+    if (stopCondition(value, maybeDim))
       continue;
 
     // Query `ValueBoundsOpInterface` for constraints. New items may be added to
@@ -237,9 +238,11 @@ void ValueBoundsConstraintSet::projectOut(
 LogicalResult ValueBoundsConstraintSet::computeBound(
     AffineMap &resultMap, ValueDimList &mapOperands, presburger::BoundType type,
     Value value, std::optional<int64_t> dim,
-    function_ref<bool(Value)> stopCondition) {
+    function_ref<bool(Value, std::optional<int64_t>)> stopCondition) {
 #ifndef NDEBUG
   assertValidValueDim(value, dim);
+  assert(!stopCondition(value, dim) &&
+         "stop condition should not be satisfied for starting point");
 #endif // NDEBUG
 
   // Process the backward slice of `value` (i.e., reverse use-def chain) until
@@ -254,7 +257,9 @@ LogicalResult ValueBoundsConstraintSet::computeBound(
     // Do not project out `valueDim`.
     if (valueDim == p)
       return false;
-    return !stopCondition(p.first);
+    auto maybeDim =
+        p.second == kIndexValue ? std::nullopt : std::make_optional(p.second);
+    return !stopCondition(p.first, maybeDim);
   });
 
   // Compute lower and upper bounds for `valueDim`.
@@ -355,9 +360,27 @@ LogicalResult ValueBoundsConstraintSet::computeBound(
   return success();
 }
 
+LogicalResult ValueBoundsConstraintSet::computeBound(
+    AffineMap &resultMap, ValueDimList &mapOperands, presburger::BoundType type,
+    Value value, std::optional<int64_t> dim, ValueDimList dependencies) {
+  if (llvm::is_contained(dependencies, std::make_pair(value, dim))) {
+    resultMap = AffineMap::get(/*dimCount=*/1, /*symbolCount=*/0,
+                               Builder(value.getContext()).getAffineDimExpr(0));
+    mapOperands.clear();
+    mapOperands.push_back(std::make_pair(value, dim));
+    return success();
+  }
+
+  return computeBound(resultMap, mapOperands, type, value, dim,
+                      [&](Value v, std::optional<int64_t> d) {
+                        return llvm::is_contained(dependencies,
+                                                  std::make_pair(v, d));
+                      });
+}
+
 FailureOr<int64_t> ValueBoundsConstraintSet::computeConstantBound(
     presburger::BoundType type, Value value, std::optional<int64_t> dim,
-    function_ref<bool(Value)> stopCondition) {
+    function_ref<bool(Value, std::optional<int64_t>)> stopCondition) {
 #ifndef NDEBUG
   assertValidValueDim(value, dim);
 #endif // NDEBUG
@@ -372,9 +395,10 @@ FailureOr<int64_t> ValueBoundsConstraintSet::computeConstantBound(
   } else {
     // No stop condition specified: Keep adding constraints until a bound could
     // be computed
-    cstr.processWorklist(/*stopCondition=*/[&](Value v) {
-      return cstr.cstr.getConstantBound64(type, pos).has_value();
-    });
+    cstr.processWorklist(
+        /*stopCondition=*/[&](Value v, std::optional<int64_t> dim) {
+          return cstr.cstr.getConstantBound64(type, pos).has_value();
+        });
   }
 
   // Compute constant bound for `valueDim`.

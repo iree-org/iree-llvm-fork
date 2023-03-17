@@ -59,10 +59,10 @@ FailureOr<OpFoldResult> reifyValueBound(OpBuilder &b, Location loc,
 /// terms of SSA values for which `stopCondition` is met. `dim` must be
 /// `nullopt` if and only if `value` is index-typed. LB and EQ bounds are
 /// closed, UB bounds are open.
-FailureOr<OpFoldResult>
-reifyValueBound(OpBuilder &b, Location loc, presburger::BoundType type,
-                Value value, std::optional<int64_t> dim,
-                function_ref<bool(Value)> stopCondition);
+FailureOr<OpFoldResult> reifyValueBound(
+    OpBuilder &b, Location loc, presburger::BoundType type, Value value,
+    std::optional<int64_t> dim,
+    function_ref<bool(Value, std::optional<int64_t>)> stopCondition);
 
 } // namespace mlir
 
