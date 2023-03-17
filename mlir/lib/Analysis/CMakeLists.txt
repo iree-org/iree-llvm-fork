@@ -2,6 +2,7 @@ set(LLVM_OPTIONAL_SOURCES
   AliasAnalysis.cpp
   CallGraph.cpp
   DataLayoutAnalysis.cpp
+  FlatValueConstraints.cpp
   Liveness.cpp
   SliceAnalysis.cpp
 
@@ -19,6 +20,7 @@ add_mlir_library(MLIRAnalysis
   CallGraph.cpp
   DataFlowFramework.cpp
   DataLayoutAnalysis.cpp
+  FlatValueConstraints.cpp
   Liveness.cpp
   SliceAnalysis.cpp
 
