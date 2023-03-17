@@ -85,8 +85,8 @@ public:
   ///
   /// Note: The dimensions/symbols of this FlatAffineConstraints must match the
   /// dimensions/symbols of the affine map.
-  LogicalResult addBound(BoundType type, unsigned pos, AffineMap boundMap,
-                         bool isClosedBound);
+  LogicalResult addBound(presburger::BoundType type, unsigned pos,
+                         AffineMap boundMap, bool isClosedBound);
 
   /// Adds a bound for the variable at the specified position with constraints
   /// being drawn from the specified bound map. In case of an EQ bound, the
@@ -96,7 +96,8 @@ public:
   /// Note: The dimensions/symbols of this FlatAffineConstraints must match the
   /// dimensions/symbols of the affine map. By default the lower bound is closed
   /// and the upper bound is open.
-  LogicalResult addBound(BoundType type, unsigned pos, AffineMap boundMap);
+  LogicalResult addBound(presburger::BoundType type, unsigned pos,
+                         AffineMap boundMap);
 
   /// The `addBound` overload above hides the inherited overloads by default, so
   /// we explicitly introduce them here.
@@ -311,7 +312,7 @@ public:
   void clearAndCopyFrom(const IntegerRelation &other) override;
 
   /// Adds a constant bound for the variable associated with the given Value.
-  void addBound(BoundType type, Value val, int64_t value);
+  void addBound(presburger::BoundType type, Value val, int64_t value);
   using FlatConstraints::addBound;
 
   /// Returns the Value associated with the pos^th variable. Asserts if
