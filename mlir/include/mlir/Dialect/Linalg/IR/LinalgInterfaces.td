@@ -621,6 +621,28 @@ def LinalgStructuredInterface : OpInterface<"LinalgOp"> {
         return failure();
       }]
     >,
+    InterfaceMethod<
+      /*desc=*/[{
+        TODO
+      }],
+      /*retTy=*/"void",
+      /*methodName=*/"mapIterationSpaceDimToAllOperandDims",
+      /*args=*/(ins "unsigned":$dimPos,
+                    "mlir::SmallVectorImpl<std::pair<Value, unsigned>>&":$operandDimPairs),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        for (auto [i, idxMap] : llvm::enumerate($_op.getIndexingMapsArray())) {
+          if (idxMap.isProjectedPermutation()) {
+            if (auto mayOperandDim = idxMap.getResultPosition(
+                getAffineDimExpr(dimPos, idxMap.getContext()))) {
+              operandDimPairs.push_back({$_op->getOperand(i), *mayOperandDim});
+            }
+          }
+        }
+
+        return;
+      }]
+    >,
     //===------------------------------------------------------------------===//
     // Linalg generalization hooks.
     //===------------------------------------------------------------------===//
