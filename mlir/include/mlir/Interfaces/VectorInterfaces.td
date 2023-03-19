@@ -60,6 +60,14 @@ def VectorTransferOpInterface : OpInterface<"VectorTransferOpInterface"> {
       /*methodBody=*/"",
       /*defaultImplementation=*/ [{ return "in_bounds"; }]
     >,
+    InterfaceMethod<
+      /*desc=*/"Return the `in_bounds` attribute name.",
+      /*retTy=*/"void",
+      /*methodName=*/"setInBoundsAttr",
+      /*args=*/(ins "::mlir::ArrayAttr":$inBoundsAttr),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/""
+    >,
     StaticInterfaceMethod<
       /*desc=*/"Return the `permutation_map` attribute name.",
       /*retTy=*/"::mlir::StringRef",

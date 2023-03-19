@@ -177,6 +177,10 @@ bool checkSameValueRAW(TransferWriteOp defWrite, TransferReadOp read);
 /// op.
 bool checkSameValueWAW(TransferWriteOp write, TransferWriteOp priorWrite);
 
+/// TODO.
+SmallVector<int64_t> composeStaticVectorSizes(AffineMap map,
+                                              ArrayRef<int64_t> vectorSizes);
+
 /// Same behavior as `isDisjointTransferSet` but doesn't require the operations
 /// to have the same tensor/memref. This allows comparing operations accessing
 /// different tensors.

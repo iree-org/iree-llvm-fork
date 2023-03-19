@@ -625,7 +625,7 @@ def LinalgStructuredInterface : OpInterface<"LinalgOp"> {
       /*desc=*/[{
         TODO
       }],
-      /*retTy=*/"void",
+      /*retTy=*/"void", // TODO: LogicalResult
       /*methodName=*/"mapIterationSpaceDimToAllOperandDims",
       /*args=*/(ins "unsigned":$dimPos,
                     "mlir::SmallVectorImpl<std::pair<Value, unsigned>>&":$operandDimPairs),
@@ -641,6 +641,26 @@ def LinalgStructuredInterface : OpInterface<"LinalgOp"> {
         }
 
         return;
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        TODO
+      }],
+      /*retTy=*/"LogicalResult",
+      /*methodName=*/"mapIterationSpaceToOperandDims",
+      /*args=*/(ins "llvm::SmallVector<std::pair<Value, int64_t>> &":$operandDimToOperandDims),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        for (int dim = 0, numDims = $_op.getNumLoops(); dim < numDims; ++dim) {
+          Value operand;
+          unsigned operandDim;
+          if(failed($_op.mapIterationSpaceDimToOperandDim(dim, operand, operandDim)))
+            return failure();
+          operandDimToOperandDims.push_back({operand, operandDim});
+        }
+
+        return success();
       }]
     >,
     //===------------------------------------------------------------------===//
