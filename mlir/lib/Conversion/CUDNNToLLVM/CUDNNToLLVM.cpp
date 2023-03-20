@@ -480,7 +480,7 @@ LogicalResult lower(BuildContext &bctxt, cudnn::PointWiseReluOp pw) {
 
 LogicalResult lower(BuildContext &bctxt, cudnn::BuildGraphOp bgop) {
   // TODO: just for testing.
-  bctxt.tensorToDescriptor[bgop.getResult()] =
+  bctxt.tensorToDescriptor[bgop->getResult(0)] =
       bctxt.tensorToDescriptor[bgop.getOperand(0)];
   return success();
 }
@@ -494,10 +494,12 @@ LogicalResult convertFunction(ModuleOp module, func::FuncOp fn) {
   // Ensure only cudnn ops in function.
   Dialect *cudnnDialect =
       module->getContext()->getLoadedDialect<CUDNNDialect>();
-  bool nonCudnnOps = llvm::any_of(fn.front().without_terminator(),
-                                  [cudnnDialect](Operation &op) {
-                                    return op.getDialect() != cudnnDialect;
-                                  });
+  bool nonCudnnOps = llvm::any_of(
+      fn.front().without_terminator(), [cudnnDialect](Operation &op) {
+        if (op.getDialect() != cudnnDialect)
+          emitWarning(op.getLoc()) << "non-cudnn op";
+        return op.getDialect() != cudnnDialect;
+      });
   if (nonCudnnOps) {
     emitWarning(fn.getLoc()) << "skipping function with non-cudnn ops";
     return success();

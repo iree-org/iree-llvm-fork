@@ -9,6 +9,7 @@
 #ifndef CUDNN_OPS
 #define CUDNN_OPS
 
+include "mlir/IR/OpBase.td"
 include "mlir/Dialect/CUDNN/IR/CUDNNDialect.td"
 include "mlir/Dialect/CUDNN/IR/CUDNNTypes.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
@@ -148,18 +149,46 @@ def CUDNN_ReductionOp : CUDNN_Op<"reduction", [Pure]> {
 
 // Utility functions.
 // ------------------
-def CUDNN_BuildGraphOp : CUDNN_Op<"build_graph", []> {
+def CUDNN_BuildGraphOp : CUDNN_Op<"build_graph", [Pure, Terminator] > {
     let summary = "Build compute graph descriptor";
 
     let arguments = (ins 
-      CUDNN_HandleType:$handle,
       Variadic<CUDNN_TensorDescType>:$graph_results
     );
-    let results = (outs CUDNN_OperationGraphType:$y);
 
     let assemblyFormat = [{
-      $handle `(` $graph_results `)` attr-dict `:` qualified(type($graph_results))
+        `(` $graph_results `)` attr-dict `:` type($graph_results)
     }];
+}
+
+def CUDNN_BuildAndExecGraphOp : CUDNN_Op<"build_and_exec_graph", [Pure, IsolatedFromAbove]> {
+    let summary = "Build and exec graph";
+
+    let arguments = (ins
+      CUDNN_HandleType:$handle,
+      Variadic<RankedTensorOf<[AnyFloat]>>:$inputs
+    );
+
+    let results = (outs
+      Variadic<RankedTensorOf<[AnyFloat]>>:$outputs
+    );
+
+    let regions = (region
+      SizedRegion<1>:$constructor
+    );
+ 
+     let assemblyFormat = [{
+      $handle $inputs attr-dict-with-keyword $constructor `:`
+        type($inputs) `->` type($outputs)
+     }];
+ }
+ 
+def CUDNN_GetCurrentHandle : CUDNN_Op<"get_current_handle", [Pure]> {
+    let summary = "Get current handle";
+
+    let arguments = (ins);
+    let results = (outs CUDNN_HandleType:$handle);
+    let assemblyFormat = [{ attr-dict type($handle) }];
 }
 
 #endif // CUDNN_OPS
