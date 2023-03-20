@@ -95,17 +95,20 @@ mgpuLaunchKernel(CUfunction function, intptr_t gridX, intptr_t gridY,
 
 extern "C" MLIR_CUDA_WRAPPERS_EXPORT CUstream mgpuStreamCreate() {
   ScopedContext scopedContext;
-  CUstream stream = nullptr;
-  CUDA_REPORT_IF_ERROR(cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING));
+  // Hack use default stream.
+  CUstream stream = (CUstream)0;
+  // CUDA_REPORT_IF_ERROR(cuStreamCreate(&stream, CU_STREAM_NON_BLOCKING));
   return stream;
 }
 
 extern "C" MLIR_CUDA_WRAPPERS_EXPORT void mgpuStreamDestroy(CUstream stream) {
-  CUDA_REPORT_IF_ERROR(cuStreamDestroy(stream));
+  // Hack use default stream.
+  // CUDA_REPORT_IF_ERROR(cuStreamDestroy(stream));
 }
 
 extern "C" MLIR_CUDA_WRAPPERS_EXPORT void
 mgpuStreamSynchronize(CUstream stream) {
+  ScopedContext scopedContext;
   CUDA_REPORT_IF_ERROR(cuStreamSynchronize(stream));
 }
 
@@ -147,6 +150,7 @@ extern "C" void mgpuMemFree(void *ptr, CUstream /*stream*/) {
 
 extern "C" void mgpuMemcpy(void *dst, void *src, size_t sizeBytes,
                            CUstream stream) {
+  ScopedContext scopedContext;
   CUDA_REPORT_IF_ERROR(cuMemcpyAsync(reinterpret_cast<CUdeviceptr>(dst),
                                      reinterpret_cast<CUdeviceptr>(src),
                                      sizeBytes, stream));
