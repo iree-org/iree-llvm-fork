@@ -1354,7 +1354,9 @@ static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
     return failure();
 
   // TODO: 0-d vectors are not supported yet.
-  if (llvm::any_of(op.getIndexingMapsArray(), [](AffineMap map) {
+  // TODO: Fill op doesn't have indexing maps? Add them for consistency?
+  if (!isa<linalg::FillOp>(op) &&
+      llvm::any_of(op.getIndexingMapsArray(), [](AffineMap map) {
         return map.isEmpty() || map.getResults().empty();
       }))
     return failure();
