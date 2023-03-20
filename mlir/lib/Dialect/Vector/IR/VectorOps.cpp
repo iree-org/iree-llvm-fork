@@ -3883,9 +3883,8 @@ struct TransferReadAfterWriteToBroadcast
 
 void TransferReadOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                                  MLIRContext *context) {
-  results
-      .add<FoldExtractSliceIntoTransferRead, TransferReadAfterWriteToBroadcast>(
-          context);
+  results.add< // FoldExtractSliceIntoTransferRead,
+      TransferReadAfterWriteToBroadcast>(context);
 }
 
 //===----------------------------------------------------------------------===//
