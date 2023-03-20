@@ -21,13 +21,13 @@ def CUDNN_PointWiseAddOp : CUDNN_Op<"pointwise_add", [Pure]> {
 
     let arguments = (ins
       CUDNN_TensorDescType:$input,
-      TypeAttr:$element_type
+      TypeAttr:$compute_type
     );
     let results = (outs CUDNN_TensorDescType:$res);
 
     let assemblyFormat = [{
-        `(` $input `)` `type` `=` $element_type
-	    attr-dict `:` type($input) `->` type($res)
+      `(` $input `)` `type` `=` $compute_type
+        attr-dict `:` qualified(type($input)) `->` qualified(type($res))
     }];
 }
 
@@ -36,14 +36,14 @@ def CUDNN_PointWiseReluOp : CUDNN_Op<"pointwise_relu", [Pure]> {
 
     let arguments = (ins
       CUDNN_TensorDescType:$input,
-      TypeAttr:$element_type,
-      F32Attr:$slope
+      TypeAttr:$compute_type,
+      F64Attr:$lower_clip
     );
     let results = (outs CUDNN_TensorDescType:$res);
 
     let assemblyFormat = [{
-        `(` $input `)` `type` `=` $element_type `slope` `=` $slope
-	  attr-dict `:` type($input) `->` type($res)
+      `(` $input `)` `type` `=` $compute_type `lower_clip` `=` $lower_clip
+        attr-dict `:` qualified(type($input)) `->` qualified(type($res))
     }];
 }
 
@@ -68,14 +68,14 @@ def CUDNN_ConvolutionOp : CUDNN_Op<"convolution", [Pure]> {
 
     let assemblyFormat = [{
       `(` $x `,` $w `)` `type` `=` $element_type
-          `alpha` `=` $alpha
-	  `beta` `=` $beta
-	  `spatial_dim_count` `=` $spatial_dim_count
-	  `spatial_stride` `=`  $spatial_stride
-	  `pre_padding` `=` $pre_padding
-	  `post_padding` `=` $post_padding
-	  `dilation` `=` $dilation
-	  attr-dict `:` type($x) `,` type($w) `->` type($y)
+         `alpha` `=` $alpha
+         `beta` `=` $beta
+         `spatial_dim_count` `=` $spatial_dim_count
+         `spatial_stride` `=`  $spatial_stride
+         `pre_padding` `=` $pre_padding
+         `post_padding` `=` $post_padding
+         `dilation` `=` $dilation
+         attr-dict `:` qualified(type($x)) `,` qualified(type($w)) `->` qualified(type($y))
     }];
 }
 
@@ -99,13 +99,13 @@ def CUDNN_CrossCorrelationOp : CUDNN_Op<"cross_correlation", [Pure]> {
     let assemblyFormat = [{
       `(` $x `,` $w `)` `type` `=` $element_type
           `alpha` `=` $alpha
-	  `beta` `=` $beta
-	  `spatial_dim_count` `=` $spatial_dim_count
-	  `spatial_stride` `=`  $spatial_stride
-	  `pre_padding` `=` $pre_padding
-	  `post_padding` `=` $post_padding
-	  `dilation` `=` $dilation
-	  attr-dict `:` type($x) `,` type($w) `->` type($y)
+          `beta` `=` $beta
+          `spatial_dim_count` `=` $spatial_dim_count
+          `spatial_stride` `=`  $spatial_stride
+          `pre_padding` `=` $pre_padding
+          `post_padding` `=` $post_padding
+          `dilation` `=` $dilation
+          attr-dict `:` qualified(type($x)) `,` qualified(type($w)) `->` qualified(type($y))
     }];
 }
 
@@ -122,8 +122,8 @@ def CUDNN_MatMulOp : CUDNN_Op<"matmul", [Pure]> {
     let results = (outs CUDNN_TensorDescType:$c);
 
     let assemblyFormat = [{
-        `(` $a `,` $b `)` `type` `=` $element_type
-	  attr-dict `:` type($a) `,` type($b) `->` type($c)
+      `(` $a `,` $b `)` `type` `=` $element_type
+         attr-dict `:` qualified(type($a)) `,` qualified(type($b)) `->` qualified(type($c))
     }];
 }
 
@@ -141,25 +141,24 @@ def CUDNN_ReductionOp : CUDNN_Op<"reduction", [Pure]> {
     let results = (outs CUDNN_TensorDescType:$y);
 
     let assemblyFormat = [{
-        `(` $x `)` `type` `=` $element_type `reduction_op` `=` $reduction_op
-	  attr-dict `:` type($x) `->` type($y)
+       `(` $x `)` `type` `=` $element_type `reduction_op` `=` $reduction_op
+         attr-dict `:` qualified(type($x)) `->` qualified(type($y))
     }];
 }
 
 // Utility functions.
 // ------------------
-def CUDNN_BuildGraphOp : CUDNN_Op<"build_graph", [Pure]> {
-    let summary = "Matmul";
+def CUDNN_BuildGraphOp : CUDNN_Op<"build_graph", []> {
+    let summary = "Build compute graph descriptor";
 
-    let arguments = (ins
+    let arguments = (ins 
       CUDNN_HandleType:$handle,
       Variadic<CUDNN_TensorDescType>:$graph_results
     );
     let results = (outs CUDNN_OperationGraphType:$y);
 
     let assemblyFormat = [{
-        $handle `(` $graph_results `)`
-	  attr-dict `:` type($graph_results) `->` type($y)
+      $handle `(` $graph_results `)` attr-dict `:` qualified(type($graph_results))
     }];
 }
 

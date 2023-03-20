@@ -1,4 +1,4 @@
-add_mlir_dialect_library(MLIRCUDNN
+add_mlir_dialect_library(MLIRCUDNNDialect
         CUDNNDialect.cpp
         CUDNNOps.cpp
         CUDNNTypes.cpp

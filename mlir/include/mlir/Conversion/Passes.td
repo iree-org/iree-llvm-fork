@@ -268,6 +268,18 @@ def ConvertControlFlowToSPIRV : Pass<"convert-cf-to-spirv"> {
 }
 
 //===----------------------------------------------------------------------===//
+// CUDNNToLLLVM
+//===----------------------------------------------------------------------===//
+
+def ConvertCUDNNToLLVMPass : Pass<"convert-cudnn-to-llvm", "ModuleOp"> {
+  let summary = "Convert CUDNN dialect to LLVM dialect";
+  let description = [{
+    This pass converts supported CUDNN ops to LLVM dialect instructions.
+  }];
+  let dependentDialects = ["LLVM::LLVMDialect"];
+}
+
+//===----------------------------------------------------------------------===//
 // FuncToLLVM
 //===----------------------------------------------------------------------===//
 
