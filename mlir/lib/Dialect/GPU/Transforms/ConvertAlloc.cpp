@@ -72,22 +72,35 @@ struct GpuTransformAllocPass
   void runOnOperation() override {
     llvm::SetVector<Value> deviceMemref;
     getOperation()->walk([&deviceMemref](gpu::LaunchFuncOp launch) {
-      for(Value operand : launch.getKernelOperands()) {
-        if(operand.getType().isa<MemRefType>())
-          deviceMemref.insert(operand);
+      for (Value operand : launch.getKernelOperands()) {
+        if (operand.getType().isa<MemRefType>()) {
+          Value memref = operand;
+          while (auto defOp = memref.getDefiningOp()) {
+            if(isa<memref::SubViewOp, memref::CollapseShapeOp>(defOp)) {
+              memref = defOp->getOperand(0);
+              continue;
+            }
+            break;
+          }
+          deviceMemref.insert(memref);
+        }
       }
     });
     for(Value memref : deviceMemref) {
-      while(auto subview = memref.getDefiningOp<memref::SubViewOp>()) {
-        memref = subview.getSource();
-      }
       auto alloc = memref.getDefiningOp<memref::AllocOp>();
       if(!alloc) {
         registerOnDevice(memref);
         continue;
       }
-      bool onlyUsedOnDevice = false; // true;
-      for(Operation* userOp : alloc->getUsers()) {
+      bool onlyUsedOnDevice = true;
+      SmallVector<Operation*> users(alloc->getUsers().begin(),alloc->getUsers().end());
+      while (!users.empty()) {
+        Operation *userOp = users.back();
+        users.pop_back();
+        if (isa<memref::SubViewOp, memref::CollapseShapeOp>(userOp)) {
+          users.append(userOp->getUsers().begin(), userOp->getUsers().end());
+          continue;
+        }
         if(!isa<gpu::LaunchFuncOp, memref::DeallocOp>(userOp)) {
           onlyUsedOnDevice = false;
           break;
@@ -100,7 +113,7 @@ struct GpuTransformAllocPass
     }
   }
 };
-}
+} // namespace
 
 std::unique_ptr<OperationPass<func::FuncOp>>
 mlir::createGpuTransformAllocPass() {
