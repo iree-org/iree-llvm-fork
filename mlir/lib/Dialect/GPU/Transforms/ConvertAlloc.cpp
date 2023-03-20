@@ -44,7 +44,7 @@ static void copyToGPUAllocAndReplace(Value memref) {
   Type empty;
   builder.create<gpu::MemcpyOp>(
       memref.getLoc(), empty, ArrayRef<Value>({}),
-      memref, newAlloc.getResult(0));
+      newAlloc.getResult(0), memref);
 }
 
 static void replaceAlloc(memref::AllocOp alloc) {
