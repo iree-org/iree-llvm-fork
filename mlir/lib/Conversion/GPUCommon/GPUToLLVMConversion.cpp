@@ -471,8 +471,7 @@ LogicalResult ConvertAllocOpToGpuRuntimeCallPattern::matchAndRewrite(
   MemRefType memRefType = allocOp.getType();
 
   if (failed(areAllLLVMTypes(allocOp, adaptor.getOperands(), rewriter)) ||
-      !isConvertibleAndHasIdentityMaps(memRefType) ||
-      failed(isAsyncWithOneDependency(rewriter, allocOp)))
+      !isConvertibleAndHasIdentityMaps(memRefType))
     return failure();
 
   auto loc = allocOp.getLoc();
@@ -488,7 +487,11 @@ LogicalResult ConvertAllocOpToGpuRuntimeCallPattern::matchAndRewrite(
   // Allocate the underlying buffer and store a pointer to it in the MemRef
   // descriptor.
   Type elementPtrType = this->getElementPtrType(memRefType);
-  auto stream = adaptor.getAsyncDependencies().front();
+  Value stream =
+      adaptor.getAsyncDependencies().empty()
+          ? streamCreateCallBuilder.create(loc, rewriter, {}).getResult()
+          : adaptor.getAsyncDependencies().front();
+
   Value allocatedPtr =
       allocCallBuilder.create(loc, rewriter, {sizeBytes, stream}).getResult();
   allocatedPtr =
@@ -500,8 +503,9 @@ LogicalResult ConvertAllocOpToGpuRuntimeCallPattern::matchAndRewrite(
   // Create the MemRef descriptor.
   auto memRefDescriptor = this->createMemRefDescriptor(
       loc, memRefType, allocatedPtr, alignedPtr, shape, strides, rewriter);
-
-  rewriter.replaceOp(allocOp, {memRefDescriptor, stream});
+  SmallVector<Value> replace = {memRefDescriptor, stream};
+  replace.resize(allocOp.getNumResults());
+  rewriter.replaceOp(allocOp, replace);
 
   return success();
 }
@@ -509,8 +513,7 @@ LogicalResult ConvertAllocOpToGpuRuntimeCallPattern::matchAndRewrite(
 LogicalResult ConvertDeallocOpToGpuRuntimeCallPattern::matchAndRewrite(
     gpu::DeallocOp deallocOp, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
-  if (failed(areAllLLVMTypes(deallocOp, adaptor.getOperands(), rewriter)) ||
-      failed(isAsyncWithOneDependency(rewriter, deallocOp)))
+  if (failed(areAllLLVMTypes(deallocOp, adaptor.getOperands(), rewriter)))
     return failure();
 
   Location loc = deallocOp.getLoc();
@@ -518,10 +521,17 @@ LogicalResult ConvertDeallocOpToGpuRuntimeCallPattern::matchAndRewrite(
   Value pointer =
       MemRefDescriptor(adaptor.getMemref()).allocatedPtr(rewriter, loc);
   auto casted = rewriter.create<LLVM::BitcastOp>(loc, llvmPointerType, pointer);
-  Value stream = adaptor.getAsyncDependencies().front();
+  Value stream =
+      adaptor.getAsyncDependencies().empty()
+          ? streamCreateCallBuilder.create(loc, rewriter, {}).getResult()
+          : adaptor.getAsyncDependencies().front();
   deallocCallBuilder.create(loc, rewriter, {casted, stream});
 
-  rewriter.replaceOp(deallocOp, {stream});
+  if (deallocOp.getNumResults() > 0)
+    rewriter.replaceOp(deallocOp, {stream});
+  else
+    rewriter.eraseOp(deallocOp);
+
   return success();
 }
 
@@ -832,8 +842,7 @@ LogicalResult ConvertMemcpyOpToGpuRuntimeCallPattern::matchAndRewrite(
   auto memRefType = memcpyOp.getSrc().getType().cast<MemRefType>();
 
   if (failed(areAllLLVMTypes(memcpyOp, adaptor.getOperands(), rewriter)) ||
-      !isConvertibleAndHasIdentityMaps(memRefType) ||
-      failed(isAsyncWithOneDependency(rewriter, memcpyOp)))
+      !isConvertibleAndHasIdentityMaps(memRefType))
     return failure();
 
   auto loc = memcpyOp.getLoc();
@@ -854,10 +863,16 @@ LogicalResult ConvertMemcpyOpToGpuRuntimeCallPattern::matchAndRewrite(
       loc, llvmPointerType,
       MemRefDescriptor(adaptor.getDst()).alignedPtr(rewriter, loc));
 
-  auto stream = adaptor.getAsyncDependencies().front();
-  memcpyCallBuilder.create(loc, rewriter, {dst, src, sizeBytes, stream});
+  Value stream =
+      adaptor.getAsyncDependencies().empty()
+          ? streamCreateCallBuilder.create(loc, rewriter, {}).getResult()
+          : adaptor.getAsyncDependencies().front();
 
-  rewriter.replaceOp(memcpyOp, {stream});
+  memcpyCallBuilder.create(loc, rewriter, {dst, src, sizeBytes, stream});
+  if (memcpyOp.getNumResults() > 0)
+    rewriter.replaceOp(memcpyOp, {stream});
+  else
+    rewriter.eraseOp(memcpyOp);
 
   return success();
 }
