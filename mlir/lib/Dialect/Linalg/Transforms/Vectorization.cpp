@@ -1340,7 +1340,13 @@ static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
            DepthwiseConv2DNchwChwOp, DepthwiseConv2DNhwcHwcOp,
            DepthwiseConv2DNhwcHwcQOp, DepthwiseConv2DNhwcHwcmOp,
            DepthwiseConv2DNhwcHwcmQOp, DepthwiseConv3DNdhwcDhwcOp,
-           DepthwiseConv3DNdhwcDhwcmOp>(op))
+           DepthwiseConv3DNdhwcDhwcmOp>(op) &&
+      !isa<PoolingNchwMaxOp, PoolingNchwSumOp, PoolingNcwMaxOp, PoolingNcwSumOp,
+           PoolingNdhwcMaxOp, PoolingNdhwcMinOp, PoolingNdhwcSumOp,
+           PoolingNhwcMaxOp, PoolingNhwcMaxUnsignedOp, PoolingNhwcMinOp,
+           PoolingNhwcMinUnsignedOp, PoolingNhwcSumOp, PoolingNwcMaxOp,
+           PoolingNwcMaxUnsignedOp, PoolingNwcMinOp,
+           PoolingNwcMinUnsignedOp, PoolingNwcSumOp>(op))
     return failure();
 
   // TODO: Index vectorization assumes static shape.
@@ -2292,13 +2298,15 @@ struct Conv1DGenerator
     auto resCanonVecShape =
         composeStaticVectorSizes(resIdxMap, canonicalVecShape);
 
-    // Make the contiguous dimension a power of two for non-canonical masked
-    // transfer ops.
-    if (isMaskingSupported()) {
-      lhsCanonVecShape.back() = llvm::PowerOf2Ceil(lhsCanonVecShape.back());
-      rhsCanonVecShape.back() = llvm::PowerOf2Ceil(rhsCanonVecShape.back());
-      resCanonVecShape.back() = llvm::PowerOf2Ceil(resCanonVecShape.back());
-    }
+    LDBG("Lhs canonical vector shape: ");
+    LLVM_DEBUG(llvm::interleaveComma(lhsCanonVecShape, llvm::dbgs()));
+    LLVM_DEBUG(llvm::dbgs() << "\n");
+    LDBG("Rhs canonical vector shape: ");
+    LLVM_DEBUG(llvm::interleaveComma(rhsCanonVecShape, llvm::dbgs()));
+    LLVM_DEBUG(llvm::dbgs() << "\n");
+    LDBG("Res canonical vector shape: ");
+    LLVM_DEBUG(llvm::interleaveComma(rhsCanonVecShape, llvm::dbgs()));
+    LLVM_DEBUG(llvm::dbgs() << "\n");
 
     lhsCanonVecType =
         VectorType::get(lhsCanonVecShape, lhsShapedType.getElementType());
@@ -2401,6 +2409,11 @@ struct Conv1DGenerator
       break;
     }
 
+    // Make lhsShape's contiguous dimension a power of two for non-canonical
+    // masked transfer ops.
+    if (enableMasking)
+      lhsShape.back() = llvm::PowerOf2Ceil(lhsShape.back());
+
     Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
 
     // w is unrolled (i.e. wSizeStep == 1) iff strideW > 1.
@@ -2421,7 +2434,7 @@ struct Conv1DGenerator
         loc, lhsType, lhsShaped, ValueRange{zero, zero, zero});
 
     // TODO.
-    if (isMaskingSupported()) {
+    if (enableMasking) {
       SmallVector<std::pair<Value, int64_t>> lhsIterSpaceToOperandDims(
           lhsShapedType.getRank());
       for (auto [i, dimSize] : llvm::enumerate(lhsShapedType.getShape())) {
@@ -2442,7 +2455,7 @@ struct Conv1DGenerator
       rhs = rewriter.create<vector::TransferReadOp>(
           loc, rhsType, rhsShaped, ValueRange{zero, zero, zero});
 
-      if (isMaskingSupported()) {
+      if (enableMasking) {
         // TODO.
         SmallVector<std::pair<Value, int64_t>> rhsIterSpaceToOperandDims(
             rhsShapedType.getRank());
@@ -2466,7 +2479,7 @@ struct Conv1DGenerator
     // TODO.
     SmallVector<std::pair<Value, int64_t>> resIterSpaceToOperandDims(
         resShapedType.getRank());
-    if (isMaskingSupported()) {
+    if (enableMasking) {
       for (auto [i, dimSize] : llvm::enumerate(resShapedType.getShape())) {
         if (ShapedType::isDynamic(dimSize))
           resIterSpaceToOperandDims[i] = {resShaped, i};
@@ -2564,8 +2577,8 @@ struct Conv1DGenerator
               loc, lhsVals[linearIndex(kw, w)], rhsVals[kw], resVals[w], maskingMap);
           break;
         case Pool:
-          resVals[w] =
-              pool1dSlice(loc, lhsVals[linearIndex(kw, w)], resVals[w]);
+          resVals[w] = pool1dSlice(loc, lhsVals[linearIndex(kw, w)], resVals[w],
+                                   maskingMap);
           break;
         }
       }
@@ -2601,7 +2614,7 @@ struct Conv1DGenerator
     // Write back res slice of size {n, w, f} @ [0, 0, 0].
     Operation *writeOp = rewriter.create<vector::TransferWriteOp>(
         loc, res, resShaped, ValueRange{zero, zero, zero});
-    if (isMaskingSupported())
+    if (enableMasking)
       writeOp = state.maskNonCanonicalOperation(
           rewriter, writeOp, op, resShapedType.getShape(),
           resIterSpaceToOperandDims, resShape);
@@ -2619,7 +2632,7 @@ struct Conv1DGenerator
         loc, lhs, rhs, res,
         /*indexingMaps=*/MapList{{n, w, c}, {c, f}, {n, w, f}},
         /*iteratorTypes=*/ArrayRef<vector::IteratorType>{par, par, par, red});
-    if (isMaskingSupported())
+    if (enableMasking)
       contraction = state
                         .maskOperation(rewriter, contraction.getDefiningOp(),
                                        op, maskingMap)
@@ -2628,13 +2641,14 @@ struct Conv1DGenerator
   }
 
   // Create a reduction: lhs{n, w, c} -> res{n, w, c}
-  Value pool1dSlice(Location loc, Value lhs,
-                    Value res) {
+  Value pool1dSlice(Location loc, Value lhs, Value res, AffineMap maskingMap) {
     if (isPoolExt)
       lhs = rewriter.create(loc, poolExtOp, lhs, res.getType())->getResult(0);
     Operation *resOp =
         rewriter.create(loc, redOp, ArrayRef<Value>{lhs, res}, res.getType());
-    return state.maskOperation(rewriter, resOp, op)->getResult(0);
+    if (enableMasking)
+      resOp = state.maskOperation(rewriter, resOp, op);
+    return resOp->getResult(0);
   }
 
   /// Generate a vector implementation for:
@@ -2667,13 +2681,20 @@ struct Conv1DGenerator
     Type lhsEltType = lhsShapedType.getElementType();
     Type rhsEltType = rhsShapedType.getElementType();
     Type resEltType = resShapedType.getElementType();
-    VectorType lhsType = VectorType::get(
-        {nSize,
-         // iw = ow * sw + kw *  dw - 1
-         //   (i.e. 16 convolved with 3 (@stride 1 dilation 1) -> 14)
-         ((wSize - 1) * strideW + 1) + ((kwSize - 1) * dilationW + 1) - 1,
-         cSize},
-        lhsEltType);
+    SmallVector<int64_t, 3> lhsShape, rhsShape, resShape;
+    lhsShape = {nSize,
+                // iw = ow * sw + kw *  dw - 1
+                //   (i.e. 16 convolved with 3 (@stride 1 dilation 1) -> 14)
+                ((wSize - 1) * strideW + 1) + ((kwSize - 1) * dilationW + 1) -
+                    1,
+                cSize};
+
+    // Make lhsShape's contiguous dimension a power of two for non-canonical
+    // masked transfer ops.
+    if (enableMasking)
+      lhsShape.back() = llvm::PowerOf2Ceil(lhsShape.back());
+
+    VectorType lhsType = VectorType::get(lhsShape, lhsEltType);
     VectorType rhsType = VectorType::get({kwSize, cSize}, rhsEltType);
     VectorType resType = VectorType::get({nSize, wSize, cSize}, resEltType);
 
@@ -2682,7 +2703,7 @@ struct Conv1DGenerator
     Value lhs = rewriter.create<vector::TransferReadOp>(
         loc, lhsType, lhsShaped, ValueRange{zero, zero, zero});
     // TODO.
-    if (isMaskingSupported()) {
+    if (enableMasking) {
       SmallVector<std::pair<Value, int64_t>> lhsIterSpaceToOperandDims(
           lhsShapedType.getRank());
       for (auto [i, dimSize] : llvm::enumerate(lhsShapedType.getShape())) {
@@ -2699,7 +2720,7 @@ struct Conv1DGenerator
     // Read rhs slice of size {kw, c} @ [0, 0].
     Value rhs = rewriter.create<vector::TransferReadOp>(loc, rhsType, rhsShaped,
                                                         ValueRange{zero, zero});
-    if (isMaskingSupported()) {
+    if (enableMasking) {
       // TODO.
       SmallVector<std::pair<Value, int64_t>> rhsIterSpaceToOperandDims(
           rhsShapedType.getRank());
@@ -2720,7 +2741,7 @@ struct Conv1DGenerator
     SmallVector<std::pair<Value, int64_t>> resIterSpaceToOperandDims(
         resShapedType.getRank());
     // TODO
-    if (isMaskingSupported()) {
+    if (enableMasking) {
       for (auto [i, dimSize] : llvm::enumerate(resShapedType.getShape())) {
         if (ShapedType::isDynamic(dimSize))
           resIterSpaceToOperandDims[i] = {resShaped, i};
@@ -2802,7 +2823,7 @@ struct Conv1DGenerator
             .create<vector::TransferWriteOp>(loc, res, resShaped,
                                              ValueRange{zero, zero, zero})
             .getOperation();
-    if (isMaskingSupported())
+    if (enableMasking)
       writeOp = state.maskNonCanonicalOperation(
           rewriter, writeOp, op, resShapedType.getShape(),
           resIterSpaceToOperandDims, resType.getShape());
@@ -2851,7 +2872,7 @@ struct Conv1DGenerator
       res = rewriter.create<arith::AddIOp>(loc, mul, acc);
     }
 
-    if (isMaskingSupported())
+    if (enableMasking)
       res =
           state.maskOperation(rewriter, res.getDefiningOp(), op)->getResult(0);
 
@@ -3005,12 +3026,6 @@ private:
     default:
       return false;
     }
-  }
-
-  bool isMaskingSupported() {
-    if (enableMasking && oper == Conv)
-      return true;
-    return false;
   }
 };
 } // namespace
