@@ -1335,7 +1335,12 @@ static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
       !isa<Conv1DNcwFcwOp, Conv1DNwcWcfOp, Conv1DOp, Conv2DNchwFchwOp,
            Conv2DNgchwFgchwOp, Conv2DNhwcFhwcOp, Conv2DNhwcHwcfOp,
            Conv2DNhwcHwcfQOp, Conv2DOp, Conv3DNdhwcDhwcfOp, Conv3DNdhwcDhwcfQOp,
-           Conv3DOp>(op))
+           Conv3DOp>(op) &&
+      !isa<DepthwiseConv1DNwcWcOp, DepthwiseConv1DNwcWcmOp,
+           DepthwiseConv2DNchwChwOp, DepthwiseConv2DNhwcHwcOp,
+           DepthwiseConv2DNhwcHwcQOp, DepthwiseConv2DNhwcHwcmOp,
+           DepthwiseConv2DNhwcHwcmQOp, DepthwiseConv3DNdhwcDhwcOp,
+           DepthwiseConv3DNdhwcDhwcmOp>(op))
     return failure();
 
   // TODO: Index vectorization assumes static shape.
@@ -2280,7 +2285,6 @@ struct Conv1DGenerator
     rhsIdxMap = idxMaps[1];
     resIdxMap = idxMaps[2];
     auto canonicalVecShape = state.getCanonicalVecShape();
-
     auto lhsCanonVecShape =
         composeStaticVectorSizes(lhsIdxMap, canonicalVecShape);
     auto rhsCanonVecShape =
@@ -2395,14 +2399,6 @@ struct Conv1DGenerator
       }
       resShape = {nSize, fSize, wSize};
       break;
-    }
-
-    // Make the contiguous dimension a power of two for non-canonical masked
-    // transfer ops.
-    if (isMaskingSupported()) {
-      lhsShape.back() = llvm::PowerOf2Ceil(lhsShape.back());
-      rhsShape.back() = llvm::PowerOf2Ceil(rhsShape.back());
-      resShape.back() = llvm::PowerOf2Ceil(resShape.back());
     }
 
     Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
@@ -2656,9 +2652,9 @@ struct Conv1DGenerator
 
     int64_t nSize, wSize, cSize, kwSize;
     // kernel{kw, c}
-    bindShapeDims(rhsShapedType, kwSize, cSize);
+    bindShapeDims(rhsCanonVecType, kwSize, cSize);
     // out{n, w, c}
-    bindShapeDims(resShapedType, nSize, wSize);
+    bindShapeDims(resCanonVecType, nSize, wSize);
 
     vector::TransferWriteOp write;
     Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
@@ -2685,12 +2681,56 @@ struct Conv1DGenerator
     // 0].
     Value lhs = rewriter.create<vector::TransferReadOp>(
         loc, lhsType, lhsShaped, ValueRange{zero, zero, zero});
+    // TODO.
+    if (isMaskingSupported()) {
+      SmallVector<std::pair<Value, int64_t>> lhsIterSpaceToOperandDims(
+          lhsShapedType.getRank());
+      for (auto [i, dimSize] : llvm::enumerate(lhsShapedType.getShape())) {
+        if (ShapedType::isDynamic(dimSize))
+          lhsIterSpaceToOperandDims[i] = {lhsShaped, i};
+      }
+      lhs = state
+                .maskNonCanonicalOperation(
+                    rewriter, lhs.getDefiningOp(), op, lhsShapedType.getShape(),
+                    lhsIterSpaceToOperandDims, lhsType.getShape())
+                ->getResult(0);
+    }
+
     // Read rhs slice of size {kw, c} @ [0, 0].
     Value rhs = rewriter.create<vector::TransferReadOp>(loc, rhsType, rhsShaped,
                                                         ValueRange{zero, zero});
+    if (isMaskingSupported()) {
+      // TODO.
+      SmallVector<std::pair<Value, int64_t>> rhsIterSpaceToOperandDims(
+          rhsShapedType.getRank());
+      for (auto [i, dimSize] : llvm::enumerate(rhsShapedType.getShape())) {
+        if (ShapedType::isDynamic(dimSize))
+          rhsIterSpaceToOperandDims[i] = {rhsShaped, i};
+      }
+      rhs = state
+                .maskNonCanonicalOperation(
+                    rewriter, rhs.getDefiningOp(), op, rhsShapedType.getShape(),
+                    rhsIterSpaceToOperandDims, rhsType.getShape())
+                ->getResult(0);
+    }
+
     // Read res slice of size {n, w, c} @ [0, 0, 0].
     Value res = rewriter.create<vector::TransferReadOp>(
         loc, resType, resShaped, ValueRange{zero, zero, zero});
+    SmallVector<std::pair<Value, int64_t>> resIterSpaceToOperandDims(
+        resShapedType.getRank());
+    // TODO
+    if (isMaskingSupported()) {
+      for (auto [i, dimSize] : llvm::enumerate(resShapedType.getShape())) {
+        if (ShapedType::isDynamic(dimSize))
+          resIterSpaceToOperandDims[i] = {resShaped, i};
+      }
+      res = state
+                .maskNonCanonicalOperation(
+                    rewriter, res.getDefiningOp(), op, resShapedType.getShape(),
+                    resIterSpaceToOperandDims, resType.getShape())
+                ->getResult(0);
+    }
 
     //===------------------------------------------------------------------===//
     // Begin vector-only rewrite part
@@ -2729,8 +2769,9 @@ struct Conv1DGenerator
     // Compute contraction: O{n, w, c} += I{n, sw * w + dw * kw, c} * F{c}
     for (int64_t kw = 0; kw < kwSize; ++kw) {
       for (int64_t w = 0; w < wSize; w += wSizeStep) {
-        resVals[w] = depthwiseConv1dSliceAsMulAcc(
-            rewriter, loc, lhsVals[linearIndex(kw, w)], rhsVals[kw], resVals[w]);
+        resVals[w] = depthwiseConv1dSliceAsMulAcc(rewriter, loc,
+                                                  lhsVals[linearIndex(kw, w)],
+                                                  rhsVals[kw], resVals[w]);
       }
     }
 
@@ -2756,10 +2797,16 @@ struct Conv1DGenerator
     //===------------------------------------------------------------------===//
 
     // Write back res slice of size {n, w, c} @ [0, 0, 0].
-    return rewriter
-        .create<vector::TransferWriteOp>(loc, res, resShaped,
-                                         ValueRange{zero, zero, zero})
-        .getOperation();
+    Operation *writeOp =
+        rewriter
+            .create<vector::TransferWriteOp>(loc, res, resShaped,
+                                             ValueRange{zero, zero, zero})
+            .getOperation();
+    if (isMaskingSupported())
+      writeOp = state.maskNonCanonicalOperation(
+          rewriter, writeOp, op, resShapedType.getShape(),
+          resIterSpaceToOperandDims, resType.getShape());
+    return writeOp;
   }
 
   // Take a value of element type T and widen to the destination type.
@@ -2782,25 +2829,33 @@ struct Conv1DGenerator
 
   /// Lower lhs{n, w, c} * rhs{c} -> res{n, w, c} to MulAcc
   Value depthwiseConv1dSliceAsMulAcc(RewriterBase &rewriter, Location loc,
-                                     Value lhs, Value rhs, Value res) {
+                                     Value lhs, Value rhs, Value acc) {
     auto rhsTy = rhs.getType().cast<ShapedType>();
-    auto resTy = res.getType().cast<ShapedType>();
+    auto accTy = acc.getType().cast<ShapedType>();
 
     // TODO(suderman): Change this to use a vector.ima intrinsic.
-    lhs = promote(rewriter, loc, lhs, resTy);
+    lhs = promote(rewriter, loc, lhs, accTy);
 
     rhs = rewriter.create<vector::BroadcastOp>(
-        loc, resTy.clone(rhsTy.getElementType()), rhs);
-    rhs = promote(rewriter, loc, rhs, resTy);
+        loc, accTy.clone(rhsTy.getElementType()), rhs);
+    rhs = promote(rewriter, loc, rhs, accTy);
 
     if (!lhs || !rhs)
       return nullptr;
 
-    if (resTy.getElementType().isa<FloatType>())
-      return rewriter.create<vector::FMAOp>(loc, lhs, rhs, res);
+    Value res;
+    if (accTy.getElementType().isa<FloatType>())
+      res = rewriter.create<vector::FMAOp>(loc, lhs, rhs, acc);
+    else {
+      auto mul = rewriter.create<arith::MulIOp>(loc, lhs, rhs);
+      res = rewriter.create<arith::AddIOp>(loc, mul, acc);
+    }
 
-    auto mul = rewriter.create<arith::MulIOp>(loc, lhs, rhs);
-    return rewriter.create<arith::AddIOp>(loc, mul, res);
+    if (isMaskingSupported())
+      res =
+          state.maskOperation(rewriter, res.getDefiningOp(), op)->getResult(0);
+
+    return res;
   }
 
   /// Entry point that transposes into the common form:
