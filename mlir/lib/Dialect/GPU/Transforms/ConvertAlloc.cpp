@@ -28,6 +28,25 @@ using namespace mlir;
 using namespace mlir::gpu;
 
 
+static void copyToGPUAllocAndReplace(Value memref) {
+  OpBuilder builder(memref.getContext());
+  if(auto def = memref.getDefiningOp()) {
+    builder.setInsertionPointAfter(def);
+  } else {
+      Block *block = memref.cast<BlockArgument>().getOwner();
+      builder.setInsertionPointToStart(block);
+  }
+
+  auto newAlloc = builder.create<gpu::AllocOp>(
+      memref.getLoc(), memref.getType(), nullptr, ArrayRef<Value>({}),
+      ArrayRef<Value>({}), ArrayRef<Value>({}));
+  memref.replaceAllUsesWith(newAlloc.getResult(0));
+  Type empty;
+  builder.create<gpu::MemcpyOp>(
+      memref.getLoc(), empty, ArrayRef<Value>({}),
+      memref, newAlloc.getResult(0));
+}
+
 static void replaceAlloc(memref::AllocOp alloc) {
   OpBuilder builder(alloc);
   auto newAlloc = builder.create<gpu::AllocOp>(
@@ -88,8 +107,9 @@ struct GpuTransformAllocPass
     });
     for(Value memref : deviceMemref) {
       auto alloc = memref.getDefiningOp<memref::AllocOp>();
-      if(!alloc) {
-        registerOnDevice(memref);
+      if (!alloc) {
+        // registerOnDevice(memref);
+        copyToGPUAllocAndReplace(memref);
         continue;
       }
       bool onlyUsedOnDevice = true;
