@@ -507,12 +507,17 @@ LogicalResult convertBuildAndExec(BuildContext &bctxt,
         TypeSwitch<Operation *, LogicalResult>(&op)
             .Case<cudnn::PointWiseReluOp, cudnn::BuildGraphOp>(
                 [&](auto pw) { return lower(bctxt, pw); })
-            .Default([](Operation *op) { return success(); });
+            .Default([](Operation *op) {
+              emitWarning(op->getLoc()) << "skipped";
+              return success();
+              });
     if (failed(result))
       return failure();
   }
 
   // The memory lifetimes are a bit unclear with these, so just leak in v0.1.
+
+  // Convert the graph construction.
 
   return success();
 }
