@@ -5507,6 +5507,7 @@ cc_library(
     deps = [
         ":AffineDialect",
         ":ArithDialect",
+        ":ArithUtils",
         ":DialectUtils",
         ":TensorDialect",
         "//llvm:Support",
@@ -5563,6 +5564,7 @@ cc_library(
         ":TensorPassIncGen",
         ":TilingInterface",
         ":Transforms",
+        ":VectorDialect",
         "//llvm:Support",
     ],
 )
