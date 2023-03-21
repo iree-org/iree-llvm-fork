@@ -178,7 +178,7 @@ def CUDNN_BuildAndExecGraphOp : CUDNN_Op<"build_and_exec_graph", [Pure, Isolated
     );
  
      let assemblyFormat = [{
-      $handle $inputs attr-dict-with-keyword $constructor `:`
+      $handle `(` $inputs `)` attr-dict-with-keyword $constructor `:`
         type($inputs) `->` type($outputs)
      }];
  }

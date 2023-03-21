@@ -26,8 +26,8 @@ namespace {
 
 // Builder of cudnn backend API calls.
 struct BuildContext {
-  BuildContext(ModuleOp module, ImplicitLocOpBuilder &builder, StringRef fnName)
-      : fnName(fnName), b(builder), module(module) {
+  BuildContext(ModuleOp module, ImplicitLocOpBuilder &builder)
+      : b(builder), module(module) {
     context = b.getContext();
     i32Ty = b.getI32Type();
     i64Ty = b.getI64Type();
@@ -67,7 +67,7 @@ struct BuildContext {
   // Returns string that is mostly unique.
   // Note: This is not sufficient in general, just for quick testing.
   std::string getUnique(StringRef str) {
-    return llvm::formatv("__const.{0}.{1}_{2}", fnName, str, ++ctr).str();
+    return llvm::formatv("__const.{0}.{1}_{2}", graphName, str, ++ctr).str();
   }
   std::string getUnique(cudnnBackendAttributeName_t attributeName) {
     switch (attributeName) {
@@ -108,7 +108,7 @@ struct BuildContext {
   FlatSymbolRefAttr cudnnBackendSetAttributeRef = nullptr;
 
   // For uniquing.
-  StringRef fnName;
+  std::string graphName;
   int64_t ctr = 0;
 
   // Cached types, mostly to reduce typing.
@@ -479,79 +479,54 @@ LogicalResult lower(BuildContext &bctxt, cudnn::PointWiseReluOp pw) {
 }
 
 LogicalResult lower(BuildContext &bctxt, cudnn::BuildGraphOp bgop) {
-  // TODO: just for testing.
-  bctxt.tensorToDescriptor[bgop->getResult(0)] =
-      bctxt.tensorToDescriptor[bgop.getOperand(0)];
+  bctxt.b.create<LLVM::ReturnOp>(bctxt.tensorToDescriptor[bgop.getOperand(0)]);
   return success();
 }
 
 // Converts a function consisting only of cudnn ops to a new builder function.
-LogicalResult convertFunction(ModuleOp module, func::FuncOp fn) {
-  // Skip unless it is supported type.
-  if (fn->getNumRegions() != 1 || fn.getFunctionType().getNumResults() != 1)
+LogicalResult convertBuildAndExec(BuildContext &bctxt,
+                                  cudnn::BuildAndExecGraphOp graph) {
+  // Skip unless build graph terminator.
+  if (!isa<cudnn::BuildGraphOp>(graph.getConstructor().front().getTerminator()))
     return success();
 
-  // Ensure only cudnn ops in function.
-  Dialect *cudnnDialect =
-      module->getContext()->getLoadedDialect<CUDNNDialect>();
-  bool nonCudnnOps = llvm::any_of(
-      fn.front().without_terminator(), [cudnnDialect](Operation &op) {
-        if (op.getDialect() != cudnnDialect)
-          emitWarning(op.getLoc()) << "non-cudnn op";
-        return op.getDialect() != cudnnDialect;
-      });
-  if (nonCudnnOps) {
-    emitWarning(fn.getLoc()) << "skipping function with non-cudnn ops";
-    return success();
-  }
+  // Create a build function.
+  bctxt.b.setInsertionPointToStart(bctxt.module.getBody());
+  auto llvmFnType = LLVM::LLVMFunctionType::get(bctxt.getVoidPtrType(),
+                                                bctxt.getVoidPtrType(),
+                                                /*isVarArg=*/false);
+  bctxt.graphName = llvm::formatv("build_{0}", ++bctxt.ctr).str();
+  auto fn = bctxt.b.create<LLVM::LLVMFuncOp>(bctxt.module.getLoc(),
+                                             bctxt.graphName, llvmFnType);
 
-  ImplicitLocOpBuilder b(module.getLoc(), fn.getBody());
-  BuildContext bctxt(module, b, fn.getName());
-
-  std::vector<Operation *> toDelete;
-  for (auto &block : fn.getBody()) {
+  bctxt.b.setInsertionPointToStart(fn.addEntryBlock());
+  for (auto &op : graph.getConstructor().front()) {
     // Tensor to descriptor mapping.
-    for (auto &op : block) {
-      // This could have been a type switch instead.
-      llvm::errs() << ">> " << op << "\n";
-      LogicalResult result =
-          TypeSwitch<Operation *, LogicalResult>(&op)
-              .Case<cudnn::PointWiseReluOp, cudnn::BuildGraphOp>(
-                  [&](auto pw) { return lower(bctxt, pw); })
-              .Case<func::ReturnOp>([&](auto ret) {
-                llvm::errs() << ": " << ret.getOperand(0) << "\n";
-                llvm::errs()
-                    << bctxt.tensorToDescriptor[ret.getOperand(0)] << "\n";
-                b.create<func::ReturnOp>(
-                    bctxt.tensorToDescriptor[ret.getOperand(0)]);
-                return success();
-              })
-              .Default([](Operation *op) { return success(); });
-      if (failed(result))
-        return failure();
-      toDelete.push_back(&op);
-    }
+    bctxt.b.setLoc(op.getLoc());
+    LogicalResult result =
+        TypeSwitch<Operation *, LogicalResult>(&op)
+            .Case<cudnn::PointWiseReluOp, cudnn::BuildGraphOp>(
+                [&](auto pw) { return lower(bctxt, pw); })
+            .Default([](Operation *op) { return success(); });
+    if (failed(result))
+      return failure();
   }
 
   // The memory lifetimes are a bit unclear with these, so just leak in v0.1.
-
-  for (auto op : toDelete) {
-    op->dropAllUses();
-    op->erase();
-  }
-  fn.setType(FunctionType::get(fn.getContext(), bctxt.getVoidPtrType(),
-                               bctxt.getVoidPtrType()));
-  fn.front().eraseArguments([](BlockArgument) { return true; });
-  fn.front().addArgument(bctxt.getVoidPtrType(), b.getUnknownLoc());
 
   return success();
 }
 
 LogicalResult convertToLLVMCalls(ModuleOp module) {
-  for (auto fn : module.getOps<func::FuncOp>())
-    if (failed(convertFunction(module, fn)))
-      return failure();
-  return success();
+  ImplicitLocOpBuilder b(module.getLoc(), module);
+  BuildContext bctxt(module, b);
+
+  auto res = module.walk([&](cudnn::BuildAndExecGraphOp g) {
+    if (failed(convertBuildAndExec(bctxt, g)))
+      return WalkResult::interrupt();
+    return WalkResult::advance();
+  });
+  return failure(res.wasInterrupted());
 }
 
 } // namespace
