@@ -291,10 +291,9 @@ LogicalResult promoteSubviewsPrecondition(Operation *op,
                                           LinalgPromotionOptions options);
 
 /// Return success if the operation can be vectorized.
-LogicalResult
-vectorizeLinalgOpPrecondition(LinalgOp linalgOp,
-                              ArrayRef<int64_t> inputVectorSizes = {},
-                              bool vectorizeNDExtract = false);
+LogicalResult vectorizeLinalgOpPrecondition(
+    LinalgOp linalgOp, ArrayRef<int64_t> inputVectorSizes = {},
+    bool vectorizeNDExtract = false, bool skipDynamicChecks = false);
 
 //===----------------------------------------------------------------------===//
 // Transformations exposed as functional-style API calls.

@@ -1365,10 +1365,9 @@ static LogicalResult vectorizeDynamicLinalgOpPrecondition(linalg::LinalgOp op) {
   return success();
 }
 
-LogicalResult
-mlir::linalg::vectorizeLinalgOpPrecondition(LinalgOp linalgOp,
-                                            ArrayRef<int64_t> inputVectorSizes,
-                                            bool vectorizeNDExtract) {
+LogicalResult mlir::linalg::vectorizeLinalgOpPrecondition(
+    LinalgOp linalgOp, ArrayRef<int64_t> inputVectorSizes,
+    bool vectorizeNDExtract, bool skipDynamicChecks) {
   // tensor with dimension of 0 cannot be vectorized.
   if (llvm::any_of(linalgOp.getStaticShape(),
                    [](int64_t dim) { return dim == 0; }))
@@ -1392,7 +1391,7 @@ mlir::linalg::vectorizeLinalgOpPrecondition(LinalgOp linalgOp,
         "static sizes");
   }
 
-  if (linalgOp.hasDynamicShape() &&
+  if (!skipDynamicChecks && linalgOp.hasDynamicShape() &&
       failed(vectorizeDynamicLinalgOpPrecondition(linalgOp))) {
     LDBG("Dynamically-shaped op failed vectorization pre-conditions\n");
     return failure();
