@@ -459,29 +459,30 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
   bindDims(b.getContext(), dim0, dim1);
   // Add two integers.
   auto addMap = AffineMap::get(2, 0, {dim0 + dim1});
-  auto add = [&](OpFoldResult v1, OpFoldResult v2) {
-    return makeComposedFoldedAffineApply(b, loc, addMap, {v1, v2});
+  auto add = [&](Value v1, Value v2) {
+    return b.createOrFold<AffineApplyOp>(loc, addMap, ValueRange{v1, v2});
   };
   // Subtract two integers.
   auto subMap = AffineMap::get(2, 0, {dim0 - dim1});
-  auto sub = [&](OpFoldResult v1, OpFoldResult v2) {
-    return makeComposedFoldedAffineApply(b, loc, subMap, {v1, v2});
+  auto sub = [&](Value v1, Value v2) {
+    return b.createOrFold<AffineApplyOp>(loc, subMap, ValueRange{v1, v2});
   };
   // Take the minimum of two integers.
   auto idMap = AffineMap::getMultiDimIdentityMap(2, b.getContext());
-  auto min = [&](OpFoldResult v1, OpFoldResult v2) {
-    return makeComposedFoldedAffineMin(b, loc, idMap, {v1, v2});
+  auto min = [&](Value v1, Value v2) {
+    return b.createOrFold<AffineMinOp>(loc, idMap, ValueRange{v1, v2});
   };
   // Take the maximum of two integers.
-  auto max = [&](OpFoldResult v1, OpFoldResult v2) {
-    return makeComposedFoldedAffineMax(b, loc, idMap, {v1, v2});
+  auto max = [&](Value v1, Value v2) {
+    return b.createOrFold<AffineMaxOp>(loc, idMap, ValueRange{v1, v2});
   };
   // Zero index-typed integer.
-  OpFoldResult zero = b.getIndexAttr(0);
+  auto zero = b.create<arith::ConstantIndexOp>(loc, 0);
 
   // Compute new offsets, lengths, low padding, high padding.
   SmallVector<OpFoldResult> newOffsets, newLengths, newStrides;
-  SmallVector<OpFoldResult> newLows, newHighs;
+  SmallVector<Value> newLows, newHighs;
+  SmallVector<int64_t> staticNewLows, staticNewHighs;
   // Set to true if the original data source is not read at all.
   bool hasZeroLen = false;
   // Same as hasZeroLen, but for dynamic dimension sizes. This condition
@@ -490,22 +491,23 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
 
   int64_t rank = padOp.getSourceType().getRank();
   for (unsigned dim = 0; dim < rank; ++dim) {
-    auto low = padOp.getMixedLowPad()[dim];
-    bool hasLowPad = !isConstantIntValue(low, 0);
-    auto high = padOp.getMixedHighPad()[dim];
-    bool hasHighPad = !isConstantIntValue(high, 0);
-    auto offset = offsets[dim];
-    auto length = sizes[dim];
-    auto srcSize =
-        tensor::createDimValue(b, loc, padOp.getSource(), dim).value();
+    auto low =
+        getValueOrCreateConstantIndexOp(b, loc, padOp.getMixedLowPad()[dim]);
+    bool hasLowPad = getConstantIntValue(low) != static_cast<int64_t>(0);
+    auto high =
+        getValueOrCreateConstantIndexOp(b, loc, padOp.getMixedHighPad()[dim]);
+    bool hasHighPad = getConstantIntValue(high) != static_cast<int64_t>(0);
+    auto offset = getValueOrCreateConstantIndexOp(b, loc, offsets[dim]);
+    auto length = getValueOrCreateConstantIndexOp(b, loc, sizes[dim]);
+    auto srcSize = b.createOrFold<tensor::DimOp>(loc, padOp.getSource(), dim);
 
     // The new amount of low padding is `low - offset`. Except for the case
     // where none of the low padding is read. In that case, the new amount of
     // low padding is zero.
     //
     // Optimization: If low = 0, then newLow = 0.
-    OpFoldResult newLow = hasLowPad ? max(zero, sub(low, offset)) : zero;
-    newLows.push_back(newLow);
+    Value newLow = hasLowPad ? max(zero, sub(low, offset)) : zero;
+    appendIndex(newLow, newLows, staticNewLows);
 
     // Start reading the data from position `offset - low`. Since the original
     // read may have started in the low padding zone, this value could be
@@ -519,10 +521,9 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
     // no data from the source.)
     //
     // Optimization: If low = 0, then the formula can be simplified.
-    OpFoldResult newOffset = hasLowPad
-                                 ? min(max(sub(offset, low), zero), srcSize)
-                                 : min(offset, srcSize);
-    newOffsets.push_back(newOffset);
+    Value newOffset = hasLowPad ? min(max(sub(offset, low), zero), srcSize)
+                                : min(offset, srcSize);
+    newOffsets.push_back(getAsOpFoldResult(newOffset));
 
     // The original ExtractSliceOp was reading until position `offset +
     // length`. Therefore, the corresponding position within the source tensor
@@ -543,21 +544,19 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
     // The new ExtractSliceOp length is `endLoc - newOffset`.
     //
     // Optimization: If low = 0, then the formula can be simplified.
-    OpFoldResult endLoc =
-        hasLowPad ? min(max(add(sub(offset, low), length), zero), srcSize)
-                  : min(add(offset, length), srcSize);
-    OpFoldResult newLength = sub(endLoc, newOffset);
-    newLengths.push_back(newLength);
+    Value endLoc = hasLowPad
+                       ? min(max(add(sub(offset, low), length), zero), srcSize)
+                       : min(add(offset, length), srcSize);
+    Value newLength = sub(endLoc, newOffset);
+    newLengths.push_back(getAsOpFoldResult(newLength));
 
     // Check if newLength is zero. In that case, no SubTensorOp should be
     // executed.
-    if (isConstantIntValue(newLength, 0)) {
-      hasZeroLen = true;
-    } else if (!hasZeroLen) {
-      Value check = b.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::eq,
-          getValueOrCreateConstantIndexOp(b, loc, newLength),
-          getValueOrCreateConstantIndexOp(b, loc, zero));
+    if (auto newLengthInt = getConstantIntValue(newLength)) {
+      hasZeroLen |= *newLengthInt == 0;
+    } else {
+      Value check = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
+                                            newLength, zero);
       dynHasZeroLenCond =
           dynHasZeroLenCond
               ? b.create<arith::OrIOp>(loc, check, dynHasZeroLenCond)
@@ -568,9 +567,8 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
     // so that the result has the same length as the original ExtractSliceOp.
     // As an optimization, if the original high padding is zero, then the new
     // high padding must also be zero.
-    OpFoldResult newHigh =
-        hasHighPad ? sub(sub(length, newLength), newLow) : zero;
-    newHighs.push_back(newHigh);
+    Value newHigh = hasHighPad ? sub(sub(length, newLength), newLow) : zero;
+    appendIndex(newHigh, newHighs, staticNewHighs);
 
     // Only unit stride supported.
     newStrides.push_back(b.getIndexAttr(1));
@@ -584,10 +582,7 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
       RankedTensorType::get(shape, padOp.getResultType().getElementType());
 
   // Insert cast to ensure that types match. (May be folded away.)
-  auto castResult = [&](Operation *op) -> Operation * {
-    Value val = op->getResult(0);
-    if (resultType == val.getType())
-      return op;
+  auto castResult = [&](Value val) -> Operation * {
     return b.create<tensor::CastOp>(loc, resultType, val);
   };
 
@@ -608,9 +603,10 @@ Operation *tensor::bubbleUpPadSlice(OpBuilder &b, tensor::PadOp padOp,
   // the result shape of the new SliceOp has a zero dimension.
   auto createPadOfExtractSlice = [&]() {
     // Create pad(extract_slice(x)).
-    Value newSliceOp = b.create<tensor::ExtractSliceOp>(
+    auto newSliceOp = b.create<tensor::ExtractSliceOp>(
         loc, padOp.getSource(), newOffsets, newLengths, newStrides);
-    auto newPadOp = b.create<PadOp>(loc, Type(), newSliceOp, newLows, newHighs);
+    auto newPadOp = b.create<PadOp>(loc, newSliceOp, staticNewLows,
+                                    staticNewHighs, newLows, newHighs);
 
     // Copy region to new PadOp.
     IRMapping bvm;
