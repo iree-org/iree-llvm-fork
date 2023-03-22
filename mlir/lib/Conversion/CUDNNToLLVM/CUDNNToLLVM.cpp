@@ -27,7 +27,7 @@ namespace {
 // Builder of cudnn backend API calls.
 struct BuildContext {
   BuildContext(ModuleOp module, ImplicitLocOpBuilder &builder)
-      : b(builder), module(module) {
+      : b(builder), module(module), symbolTable(module) {
     context = b.getContext();
     i32Ty = b.getI32Type();
     i64Ty = b.getI64Type();
@@ -56,7 +56,7 @@ struct BuildContext {
   void setDescriptorAttribute(Value descriptor,
                               cudnnBackendAttributeName_t attributeName,
                               cudnnBackendAttributeType_t attributeType,
-                              Value lowered);
+                              int elementCount, Value lowered);
 
   // Finalize building the descriptor.
   void finalizeDescriptor(Value descriptor);
@@ -65,20 +65,19 @@ struct BuildContext {
   void destroyDescriptor(Value descriptor);
 
   // Returns string that is mostly unique.
-  // Note: This is not sufficient in general, just for quick testing.
-  std::string getUnique(StringRef str) {
-    return llvm::formatv("__const.{0}.{1}_{2}", graphName, str, ++ctr).str();
+  std::string getName(StringRef str) {
+    return llvm::formatv("__const.{0}.{1}", graphName, str).str();
   }
-  std::string getUnique(cudnnBackendAttributeName_t attributeName) {
+  std::string getName(cudnnBackendAttributeName_t attributeName) {
     switch (attributeName) {
     case CUDNN_ATTR_TENSOR_DIMENSIONS:
-      return getUnique("dims");
+      return getName("dims");
     case CUDNN_ATTR_TENSOR_STRIDES:
-      return getUnique("strides");
+      return getName("strides");
     case CUDNN_ATTR_TENSOR_UNIQUE_ID:
-      return getUnique("uid");
+      return getName("uid");
     default:
-      return getUnique("attr");
+      return getName("attr");
     }
   }
 
@@ -117,7 +116,9 @@ struct BuildContext {
   llvm::MapVector<Value, Value> tensorToDescriptor;
 
   ImplicitLocOpBuilder &b;
+  Value handle;
   ModuleOp module;
+  SymbolTable symbolTable;
   MLIRContext *context;
 };
 
@@ -241,9 +242,10 @@ void BuildContext::setDescriptorAttribute(
     auto type = LLVM::LLVMArrayType::get(i64Ty, value.size());
     global = b.create<LLVM::GlobalOp>(
         type, /*isConstant=*/true, LLVM::Linkage::Private,
-        getUnique(attributeName), b.getI64TensorAttr(value),
+        getName(attributeName), b.getI64TensorAttr(value),
         /*alignment=*/16, /*addrSpace=*/0,
         /*dsoLocal=*/true);
+    symbolTable.insert(global);
     // TODO: unnamed_addr
   }
 
@@ -274,13 +276,14 @@ void BuildContext::setDescriptorAttribute(
     auto type = LLVM::LLVMArrayType::get(i64Ty, value.size());
     global = b.create<LLVM::GlobalOp>(
         type, /*isConstant=*/true, LLVM::Linkage::Private,
-        getUnique(attributeName),
+        getName(attributeName),
         DenseElementsAttr::get(
             RankedTensorType::get(static_cast<int64_t>(value.size()),
                                   b.getF64Type()),
             value),
         /*alignment=*/16, /*addrSpace=*/0,
         /*dsoLocal=*/true);
+    symbolTable.insert(global);
     // TODO: unnamed_addr
   }
 
@@ -302,12 +305,13 @@ void BuildContext::setDescriptorAttribute(
 
 void BuildContext::setDescriptorAttribute(
     Value descriptor, cudnnBackendAttributeName_t attributeName,
-    cudnnBackendAttributeType_t attributeType, Value lowered) {
+    cudnnBackendAttributeType_t attributeType, int elementCount,
+    Value lowered) {
   auto alloca = b.create<LLVM::BitcastOp>(getVoidPtrType(), lowered);
 
   auto nameVal = i32(attributeName);
   auto typeVal = i32(attributeType);
-  auto valSize = i64(1);
+  auto valSize = i64(elementCount);
   b.create<LLVM::CallOp>(
       ArrayRef<Type>{i32Ty}, getOrInsertSetAttributeFn(),
       ArrayRef<Value>{descriptor, nameVal, typeVal, valSize, alloca});
@@ -428,11 +432,10 @@ LogicalResult lower(BuildContext &bctxt, cudnn::PointWiseReluOp pw) {
       desc, CUDNN_ATTR_POINTWISE_MATH_PREC, CUDNN_TYPE_DATA_TYPE,
       ArrayRef<int64_t>(elementTypeToDataType(pw.getComputeType())));
   // TODO: Should be op attribute.
-  /*
-  int64_t nan_progagation = CUDNN_NOT_PROPAGATE_NAN;
+  int64_t nan_propagation = CUDNN_NOT_PROPAGATE_NAN;
   bctxt.setDescriptorAttribute(desc, CUDNN_ATTR_POINTWISE_NAN_PROPAGATION,
-                               CUDNN_TYPE_NAN_PROPOGATION, 1, &nan_propagation);
-  */
+                               CUDNN_TYPE_NAN_PROPOGATION,
+                               ArrayRef<int64_t>{nan_propagation});
   double lowerClip = pw.getLowerClip().convertToDouble();
   bctxt.setDescriptorAttribute(desc, CUDNN_ATTR_POINTWISE_RELU_LOWER_CLIP,
                                CUDNN_TYPE_DOUBLE, ArrayRef<double>(lowerClip));
@@ -457,11 +460,11 @@ LogicalResult lower(BuildContext &bctxt, cudnn::PointWiseReluOp pw) {
   auto yDesc = bctxt.createDescriptorFor(pw.getResult());
   bctxt.setDescriptorAttribute(nodeDesc,
                                CUDNN_ATTR_OPERATION_POINTWISE_PW_DESCRIPTOR,
-                               CUDNN_TYPE_BACKEND_DESCRIPTOR, desc);
+                               CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, desc);
   bctxt.setDescriptorAttribute(nodeDesc, CUDNN_ATTR_OPERATION_POINTWISE_XDESC,
-                               CUDNN_TYPE_BACKEND_DESCRIPTOR, xDesc);
+                               CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, xDesc);
   bctxt.setDescriptorAttribute(nodeDesc, CUDNN_ATTR_OPERATION_POINTWISE_YDESC,
-                               CUDNN_TYPE_BACKEND_DESCRIPTOR, yDesc);
+                               CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, yDesc);
   // TODO: Should be op attribute.
   double alpha = 1.0;
   cudnnBackendAttributeType_t alphabetaType = CUDNN_TYPE_FLOAT;
@@ -479,7 +482,37 @@ LogicalResult lower(BuildContext &bctxt, cudnn::PointWiseReluOp pw) {
 }
 
 LogicalResult lower(BuildContext &bctxt, cudnn::BuildGraphOp bgop) {
-  bctxt.b.create<LLVM::ReturnOp>(bctxt.tensorToDescriptor[bgop.getOperand(0)]);
+  // Create descriptor for operation graph.
+  auto desc = bctxt.createDescriptor(CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR);
+  bctxt.setDescriptorAttribute(desc, CUDNN_ATTR_POINTWISE_MODE,
+                               CUDNN_TYPE_POINTWISE_MODE,
+                               ArrayRef<int64_t>(CUDNN_POINTWISE_RELU_FWD));
+  auto indexType = bctxt.i32Ty;
+  auto arrayTy = LLVM::LLVMArrayType::get(bctxt.getVoidPtrType(),
+                                          bctxt.tensorToDescriptor.size());
+  auto arrayPtrTy = LLVM::LLVMPointerType::get(bgop.getContext());
+  LLVM::LLVMPointerType indexPtrTy = arrayPtrTy;
+  auto one =
+      bctxt.b.create<LLVM::ConstantOp>(indexType, bctxt.b.getIndexAttr(1));
+  auto alloca = bctxt.b.create<LLVM::AllocaOp>(arrayPtrTy, arrayTy, one,
+                                               /*alignment=*/16);
+  int64_t ops = 0;
+  for (auto it : llvm::enumerate(bctxt.tensorToDescriptor)) {
+    auto [k, v] = it.value();
+    if (isa<BlockArgument>(k))
+      continue;
+    auto resultPtr = bctxt.b.create<LLVM::GEPOp>(
+        indexPtrTy, arrayTy, alloca, ArrayRef<LLVM::GEPArg>{0, it.index()});
+    bctxt.b.create<LLVM::StoreOp>(v, resultPtr);
+    ++ops;
+  }
+  bctxt.setDescriptorAttribute(desc, CUDNN_ATTR_OPERATIONGRAPH_OPS,
+                               CUDNN_TYPE_BACKEND_DESCRIPTOR, ops, alloca);
+  bctxt.setDescriptorAttribute(desc, CUDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                               CUDNN_TYPE_HANDLE, 1, bctxt.handle);
+
+  bctxt.finalizeDescriptor(desc);
+  bctxt.b.create<LLVM::ReturnOp>(desc);
   return success();
 }
 
@@ -495,13 +528,14 @@ LogicalResult convertBuildAndExec(BuildContext &bctxt,
   auto llvmFnType = LLVM::LLVMFunctionType::get(bctxt.getVoidPtrType(),
                                                 bctxt.getVoidPtrType(),
                                                 /*isVarArg=*/false);
-  bctxt.graphName = llvm::formatv("build_{0}", ++bctxt.ctr).str();
   auto fn = bctxt.b.create<LLVM::LLVMFuncOp>(bctxt.module.getLoc(),
-                                             bctxt.graphName, llvmFnType);
-
+                                             "buildGraph", llvmFnType);
+  bctxt.graphName = bctxt.symbolTable.insert(fn).str();
   bctxt.b.setInsertionPointToStart(fn.addEntryBlock());
+  bctxt.handle = fn.getArgument(0);
+
+  bctxt.tensorToDescriptor.clear();
   for (auto &op : graph.getConstructor().front()) {
-    // Tensor to descriptor mapping.
     bctxt.b.setLoc(op.getLoc());
     LogicalResult result =
         TypeSwitch<Operation *, LogicalResult>(&op)
@@ -510,14 +544,12 @@ LogicalResult convertBuildAndExec(BuildContext &bctxt,
             .Default([](Operation *op) {
               emitWarning(op->getLoc()) << "skipped";
               return success();
-              });
+            });
     if (failed(result))
       return failure();
   }
 
   // The memory lifetimes are a bit unclear with these, so just leak in v0.1.
-
-  // Convert the graph construction.
 
   return success();
 }
