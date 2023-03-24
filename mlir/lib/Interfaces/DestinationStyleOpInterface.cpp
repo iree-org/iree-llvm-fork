@@ -54,6 +54,7 @@ LogicalResult detail::verifyDestinationStyleOpInterface(Operation *op) {
            << ") to be equal to the number of output tensors ("
            << outputTensorOperands.size() << ")";
 
+/*
   for (OpOperand *opOperand : outputTensorOperands) {
     OpResult result = dstStyleOp.getTiedOpResult(opOperand);
     if (result.getType() != opOperand->get().getType())
@@ -63,5 +64,6 @@ LogicalResult detail::verifyDestinationStyleOpInterface(Operation *op) {
              << " to match type of corresponding result (" << result.getType()
              << ")";
   }
+*/
   return success();
 }

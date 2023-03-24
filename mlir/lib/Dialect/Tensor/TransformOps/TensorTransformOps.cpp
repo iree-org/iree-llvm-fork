@@ -19,6 +19,10 @@ using namespace mlir;
 // TrackingListener
 //===----------------------------------------------------------------------===//
 
+void tensor::TrackingListener::notifyOperationInserted(Operation *op) {
+  newOps[op->getName()].insert(op);
+}
+
 void tensor::TrackingListener::notifyOperationRemoved(Operation *op) {
   // TODO: Walk can be removed when D144193 has landed.
   op->walk([&](Operation *op) {
@@ -38,6 +42,7 @@ void tensor::TrackingListener::notifyOperationReplaced(Operation *op,
                                                        ValueRange newValues) {
   assert(op->getNumResults() == newValues.size() &&
          "invalid number of replacement values");
+  if (op->getNumResults() == 0) return;
 
   // Replace value handles.
   for (auto [oldValue, newValue] : llvm::zip(op->getResults(), newValues))
