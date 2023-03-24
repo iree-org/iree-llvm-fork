@@ -50,7 +50,7 @@ module {
 transform.sequence failures(propagate) {
 ^bb0(%arg0: !pdl.operation):
   test_add_test_extension "A"
-   // This is okay because we are replacing the top-level module opeation
+   // This is okay because we are replacing the top-level module operation
    // (0 results) with this operation that has _more_ (1) results.
   %dummy = test_remap_operand_to_self %arg0 : !pdl.operation
 }
