@@ -132,6 +132,47 @@ LogicalResult PatternApplicatorExtension::findAllMatches(
 } // namespace
 
 //===----------------------------------------------------------------------===//
+// TrackingListener
+//===----------------------------------------------------------------------===//
+
+void transform::TrackingListener::notifyOperationRemoved(Operation *op) {
+  // TODO: Walk can be removed when D144193 has landed.
+  op->walk([&](Operation *op) {
+    // Remove mappings for result values.
+    for (OpResult value : op->getResults())
+      (void)replacePayloadValue(value, nullptr);
+    // Remove mapping for op.
+    (void)replacePayloadOp(op, nullptr);
+  });
+}
+
+void transform::TrackingListener::notifyOperationReplaced(
+    Operation *op, ValueRange newValues) {
+  assert(op->getNumResults() == newValues.size() &&
+         "invalid number of replacement values");
+
+  // Replace value handles.
+  for (auto [oldValue, newValue] : llvm::zip(op->getResults(), newValues))
+    (void)replacePayloadValue(oldValue, newValue);
+
+  // If the replacement values belong to different ops, drop the mapping.
+  if (newValues.empty() ||
+      !llvm::all_equal(llvm::map_range(
+          newValues, [](Value v) { return v.getDefiningOp(); })))
+    return;
+
+  // If the replacement op has a different type, drop the mapping.
+  Operation *defOp = newValues.front().getDefiningOp();
+  if (!defOp)
+    return;
+  if (op->getName() != defOp->getName())
+    return;
+
+  // Replace op handle.
+  (void)replacePayloadOp(op, defOp);
+}
+
+//===----------------------------------------------------------------------===//
 // AlternativesOp
 //===----------------------------------------------------------------------===//
 

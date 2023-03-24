@@ -29,7 +29,7 @@ def DestinationStyleOpInterface : OpInterface<"DestinationStyleOpInterface"> {
     init is tied to a corresponding tensor OpResult in a 1-to-1 fashion.
     The i-th init tensor is tied to the i-th OpResult. The op may not have any
     additional OpResults. Init operands and their tied OpResults have the same
-    type.
+    type or a cast/reshape-compatible type.
 
     If the op has "buffer semantics", then the input operands are either ranked
     memrefs or other non-tensor types, e.g. scalar types. Furthermore, the
@@ -130,7 +130,7 @@ def DestinationStyleOpInterface : OpInterface<"DestinationStyleOpInterface"> {
       /*args=*/(ins),
       /*methodBody=*/"",
       /*defaultImplementation=*/[{
-        return $_op.getNumOperands() - $_op.getNumDpsInits();
+        return $_op->getNumOperands() - $_op.getNumDpsInits();
       }]
     >,
     InterfaceMethod<
@@ -142,7 +142,7 @@ def DestinationStyleOpInterface : OpInterface<"DestinationStyleOpInterface"> {
       /*defaultImplementation=*/[{
         auto [start, end] = $_op.getDpsInitsPositionRange();
         int64_t numInits = end - start;
-        int64_t numOperands = $_op.getNumOperands();
+        int64_t numOperands = $_op->getNumOperands();
 
         ::mlir::OpOperandVector result;
         result.reserve(numOperands - numInits);
@@ -229,6 +229,17 @@ def DestinationStyleOpInterface : OpInterface<"DestinationStyleOpInterface"> {
       /*defaultImplementation=*/[{
         assert(opResult.getDefiningOp() == $_op.getOperation());
         return $_op.getDpsInitOperand(opResult.getResultNumber());
+      }]
+    >,
+    InterfaceMethod<
+      /*desc=*/"Return 'true' if the given OpResult has a tied OpOperand.",
+      /*retTy=*/"bool",
+      /*methodName=*/"hasTiedOpOperand",
+      /*args=*/(ins "::mlir::OpResult":$opResult),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/[{
+        assert(opResult.getDefiningOp() == $_op.getOperation());
+        return opResult.getResultNumber() <= $_op.getNumDpsInits();
       }]
     >,
     //===------------------------------------------------------------------===//

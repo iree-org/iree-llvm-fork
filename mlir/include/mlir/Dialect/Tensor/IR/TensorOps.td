@@ -60,7 +60,7 @@ class Tensor_OpWithOffsetSizesAndStrides<string mnemonic,
 def Tensor_CastOp : Tensor_Op<"cast", [
     DeclareOpInterfaceMethods<CastOpInterface>,
     DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>,
-    Pure
+    DestinationStyleOpInterface, Pure
   ]> {
   let summary = "tensor cast operation";
   let description = [{
@@ -88,6 +88,12 @@ def Tensor_CastOp : Tensor_Op<"cast", [
   let arguments = (ins AnyTensor:$source);
   let results = (outs AnyTensor:$dest);
   let assemblyFormat = "$source attr-dict `:` type($source) `to` type($dest)";
+
+  let extraClassDeclaration = [{
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      return {0, 1};  // `source` operand
+    }
+  }];
 
   let hasCanonicalizer = 1;
 }
@@ -969,14 +975,17 @@ def Tensor_ReshapeOp: Tensor_Op<"reshape", [
 class Tensor_ReassociativeReshapeOp<string mnemonic, list<Trait> traits = []> :
     Tensor_Op<mnemonic, !listconcat(traits, [
       DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>,
-      Pure])>,
+      DestinationStyleOpInterface, Pure])>,
     Arguments<(ins AnyTensor:$src, IndexListArrayAttr:$reassociation)>,
     Results<(outs AnyTensor:$result)> {
 
   code commonExtraClassDeclaration = [{
     static StringRef getReassociationAttrStrName() { return "reassociation"; }
+
     SmallVector<AffineMap, 4> getReassociationMaps();
+
     SmallVector<ReassociationExprs, 4> getReassociationExprs();
+
     SmallVector<ReassociationIndices, 4> getReassociationIndices() {
       SmallVector<ReassociationIndices, 4> reassociationIndices;
       for (auto attr : getReassociation())
@@ -985,12 +994,18 @@ class Tensor_ReassociativeReshapeOp<string mnemonic, list<Trait> traits = []> :
               return indexAttr.cast<IntegerAttr>().getInt();
             })));
       return reassociationIndices;
-    };
+    }
+
     RankedTensorType getSrcType() {
       return getSrc().getType().cast<RankedTensorType>();
     }
+
     RankedTensorType getResultType() {
       return getResult().getType().cast<RankedTensorType>();
+    }
+
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      return {0, 1}; // `src` operand
     }
   }];
 

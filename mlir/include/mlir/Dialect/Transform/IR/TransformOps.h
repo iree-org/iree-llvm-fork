@@ -15,6 +15,7 @@
 #include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Interfaces/CastInterfaces.h"
@@ -31,6 +32,19 @@ using SequenceBodyBuilderFn = ::llvm::function_ref<void(
 using SequenceBodyBuilderArgsFn =
     ::llvm::function_ref<void(::mlir::OpBuilder &, ::mlir::Location,
                               ::mlir::BlockArgument, ::mlir::ValueRange)>;
+
+/// A listener that updates a TransformState based on IR modifications.
+class TrackingListener : public RewriterBase::Listener,
+                         public TransformState::Extension {
+public:
+  explicit TrackingListener(TransformState &state)
+      : TransformState::Extension(state) {}
+
+  void notifyOperationReplaced(Operation *op, ValueRange newValues) override;
+
+  void notifyOperationRemoved(Operation *op) override;
+};
+
 } // namespace transform
 } // namespace mlir
 
