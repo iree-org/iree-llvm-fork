@@ -471,6 +471,11 @@ createLinalgBodyCalculationForElementwiseOp(Operation *op, ValueRange args,
     }
 
     if (arith::FPToSIOp::areCastCompatible(srcTy, dstTy)) {
+      auto zero = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getF32FloatAttr(0.0f));
+      auto half = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getF32FloatAttr(0.5f));
+
       auto intMin = rewriter.create<arith::ConstantOp>(
           loc, rewriter.getF32FloatAttr(
                    APInt::getSignedMinValue(dstTy.getIntOrFloatBitWidth())
@@ -481,7 +486,12 @@ createLinalgBodyCalculationForElementwiseOp(Operation *op, ValueRange args,
                    APInt::getSignedMaxValue(dstTy.getIntOrFloatBitWidth())
                        .getSExtValue()));
 
-      auto rounded = rewriter.create<math::RoundEvenOp>(loc, args[0]);
+      auto added = rewriter.create<arith::AddFOp>(loc, args[0], half);
+      auto subbed = rewriter.create<arith::SubFOp>(loc, args[0], half);
+      auto negative = rewriter.create<arith::CmpFOp>(
+          loc, arith::CmpFPredicate::OLT, args[0], zero);
+      auto rounded =
+          rewriter.create<arith::SelectOp>(loc, negative, subbed, added);
 
       auto clamped = clampFloatHelper(loc, rounded, intMin, intMax, rewriter);
 
