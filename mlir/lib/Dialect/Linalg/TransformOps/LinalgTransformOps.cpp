@@ -1982,6 +1982,7 @@ transform::RewriteInDestinationPassingStyleOp::applyToOne(
               });
   if (failed(maybeResult))
     return emitDefaultSilenceableFailure(target);
+
   results.push_back(*maybeResult);
   return DiagnosedSilenceableFailure::success();
 }

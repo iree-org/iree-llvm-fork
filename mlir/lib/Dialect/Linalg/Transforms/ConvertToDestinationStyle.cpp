@@ -299,17 +299,36 @@ mlir::linalg::rewriteInDestinationPassingStyle(RewriterBase &rewriter,
     if (resultType.isDynamicDim(i))
       dynamicSizes.push_back(reifiedShape[0][i].get<Value>());
 
-  // If the `padOp` has a nofold attribute and all paddings are known to be 0,
-  // explicitly insert a `linalg.copy`.
-  if (padOp.getNofoldAttr() &&
-      llvm::all_of(padOp.getMixedLowPad(), isZeroIndex) &&
-      llvm::all_of(padOp.getMixedHighPad(), isZeroIndex)) {
+  SmallVector<OpFoldResult> sliceSizes =
+      getMixedSizes(rewriter, loc, padOp.getSource());
+  SmallVector<OpFoldResult> sliceStrides(resultType.getRank(),
+                                         rewriter.getIndexAttr(1));
+  // If the `padOp` has a nofold attribute, always emit an AllocTensorOp + copy.
+  if (padOp.getNofoldAttr()) {
     using bufferization::AllocTensorOp;
     Value allocated =
         rewriter.create<AllocTensorOp>(loc, resultType, dynamicSizes);
-    auto copyOp = rewriter.replaceOpWithNewOp<linalg::CopyOp>(
-        padOp, padOp.getSource(), allocated);
-    return copyOp.getOperation();
+    // If all paddings are known to be 0, just insert a `linalg.copy`.
+    bool isCopy = llvm::all_of(padOp.getMixedLowPad(), isZeroIndex) &&
+                  llvm::all_of(padOp.getMixedHighPad(), isZeroIndex);
+    if (isCopy) {
+      auto copyOp = rewriter.replaceOpWithNewOp<linalg::CopyOp>(
+          padOp, padOp.getSource(), allocated);
+      return copyOp.getOperation();
+    }
+    Operation *fillOp =
+        movePaddingToFillOrGenericOp(rewriter, loc, padOp, allocated);
+    rewriter.setInsertionPointAfter(fillOp);
+    allocated = rewriter.create<tensor::ExtractSliceOp>(
+        loc, fillOp->getResult(0),
+        /*offsets=*/padOp.getMixedLowPad(), sliceSizes, sliceStrides);
+    auto copyOp =
+        rewriter.create<linalg::CopyOp>(loc, padOp.getSource(), allocated);
+    // Create tensor::InsertSliceOp.
+    auto insertSliceOp = rewriter.replaceOpWithNewOp<tensor::InsertSliceOp>(
+        padOp, copyOp->getResult(0), fillOp->getResult(0),
+        /*offsets=*/padOp.getMixedLowPad(), sliceSizes, sliceStrides);
+    return insertSliceOp.getOperation();
   }
 
   Value empty = rewriter.create<EmptyOp>(loc, resultType, dynamicSizes);
@@ -318,10 +337,6 @@ mlir::linalg::rewriteInDestinationPassingStyle(RewriterBase &rewriter,
   rewriter.setInsertionPointAfter(fillOp);
 
   // Create tensor::InsertSliceOp.
-  SmallVector<OpFoldResult> sliceSizes =
-      getMixedSizes(rewriter, loc, padOp.getSource());
-  SmallVector<OpFoldResult> sliceStrides(resultType.getRank(),
-                                         rewriter.getIndexAttr(1));
   auto insertSliceOp = rewriter.replaceOpWithNewOp<tensor::InsertSliceOp>(
       padOp, padOp.getSource(), fillOp->getResult(0),
       /*offsets=*/padOp.getMixedLowPad(), sliceSizes, sliceStrides);
@@ -353,8 +368,9 @@ Value linalg::bufferizeToAllocation(RewriterBase &rewriter, Value value,
   rewriter.setInsertionPointAfter(alloc.getDefiningOp());
   rewriter.create<memref::TensorStoreOp>(loc, value, alloc);
 
-  // Create bufferization.to_tensor with "restrict" and "writable". The returned
-  // tensor is a new buffer allocation, so it does not alias with any buffer.
+  // Create bufferization.to_tensor with "restrict" and "writable". The
+  // returned tensor is a new buffer allocation, so it does not alias with any
+  // buffer.
   Value toTensorOp = rewriter.create<bufferization::ToTensorOp>(
       loc, alloc, /*restrict=*/true, /*writable=*/true);
   for (OpOperand *use : uses) {
