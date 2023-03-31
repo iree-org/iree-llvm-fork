@@ -422,11 +422,87 @@ static FailureOr<ForallTilingResult> tileToForallOpImpl(
   }
   return ForallTilingResult{forallOp, tiledOp};
 }
+/// Rewrite a TilingInterface `op` to a tiled `scf.forall`. The
+/// tiling is specified by the number of tiles/threads `numThreads` and the
+/// optional nominal tile size `nominalTileSizes`. If `nominalTilSizes` is
+/// not specified, then  it is derived from `numThreads` as `ceilDiv(dimSize[i],
+/// numThreads[i])`. If non-empty, the `mapping` is added as an
+/// attribute to the resulting `scf.forall`. A zero tile sizes indicate
+/// that the dimension is not tiled, and can be thought of as tiling by the full
+/// size of data.
+/// It is the user's responsibility to ensure that `numThreads` is a valid
+/// tiling specification (i.e. that only tiles parallel dimensions, e.g. in the
+/// Linalg case). If `omitTileOffsetBoundsCheck` is true, then the function will
+/// assume that `tileSize[i] * (numThread[i] -1) <= dimSize[i]` holds.
+static FailureOr<ForallTilingResult> tileToForallOpImplBuffers(
+    RewriterBase &b, TilingInterface op, ArrayRef<OpFoldResult> numThreads,
+    std::optional<ArrayRef<OpFoldResult>> nominalTileSizes,
+    std::optional<ArrayAttr> mapping, bool omitTileOffsetBoundsCheck) {
+  Location loc = op->getLoc();
+  OpBuilder::InsertionGuard g(b);
+
+  SmallVector<Range> loopRanges = op.getIterationDomain(b);
+  if (loopRanges.empty())
+    return op->emitOpError("expected non-empty loop ranges");
+  auto hasStrideOne = [](Range r) { return !isConstantIntValue(r.stride, 1); };
+  if (llvm::any_of(loopRanges, hasStrideOne))
+    return op->emitOpError("only stride-1 supported atm");
+
+  SmallVector<OpFoldResult> nonZeroNumThreads =
+      llvm::to_vector(llvm::make_filter_range(numThreads, [](OpFoldResult ofr) {
+        return !isConstantIntValue(ofr, 0);
+      }));
+  SmallVector<Value> materializedNonZeroNumThreads =
+      llvm::to_vector(llvm::map_range(nonZeroNumThreads, [&](OpFoldResult ofr) {
+        return getValueOrCreateConstantIndexOp(b, loc, ofr);
+      }));
+
+  Operation *tiledOp = nullptr;
+
+  // 1. Create the ForallOp. We don't use the lambda body-builder
+  // version because we require the use of RewriterBase in the body, so we
+  // manually move the insertion point to the body below.
+  scf::ForallOp forallOp = b.create<scf::ForallOp>(
+      loc, getAsOpFoldResult((materializedNonZeroNumThreads)),
+      /*dest=*/ValueRange{}, mapping);
+
+  // 2. Fill out the ForallOp body.
+  SmallVector<OpFoldResult> tiledOffsets, tiledSizes;
+  calculateTileOffsetsAndSizes(b, loc, forallOp, numThreads, loopRanges,
+                               omitTileOffsetBoundsCheck, nominalTileSizes,
+                               tiledOffsets, tiledSizes);
+
+  // 3. Clone the tileable op and update its destination operands to use the
+  // output bbArgs of the ForallOp.
+  ArrayRef<BlockArgument> destBbArgs = forallOp.getOutputBlockArguments();
+  {
+    // 3.a. RAII guard, inserting within forallOp, before terminator.
+    OpBuilder::InsertionGuard g(b);
+    b.setInsertionPoint(forallOp.getTerminator());
+    Operation *clonedOp = b.clone(*op.getOperation());
+
+    // 4. Tile the cloned op and delete the clone.
+    FailureOr<TilingResult> tilingResult =
+        cast<TilingInterface>(clonedOp).getTiledImplementation(b, tiledOffsets,
+                                                               tiledSizes);
+    b.eraseOp(clonedOp);
+    assert(tilingResult->tiledOps.size() == 1 &&
+           "expected a single produced tiled op");
+    tiledOp = tilingResult->tiledOps.front();
+  }
+
+  return ForallTilingResult{forallOp, tiledOp};
+}
 
 FailureOr<ForallTilingResult>
 linalg::tileToForallOp(RewriterBase &b, TilingInterface op,
                        ArrayRef<OpFoldResult> numThreads,
                        std::optional<ArrayAttr> mapping) {
+  if (op->getNumResults() == 0) {
+    return tileToForallOpImplBuffers(b, op, numThreads,
+                                     /*nominalTileSizes=*/std::nullopt, mapping,
+                                     /*omitTileOffsetBoundsCheck=*/false);
+  }
   return tileToForallOpImpl(b, op, numThreads,
                             /*nominalTileSizes=*/std::nullopt, mapping,
                             /*omitTileOffsetBoundsCheck=*/false);
@@ -449,6 +525,11 @@ linalg::tileToForallOpUsingTileSizes(RewriterBase &b, TilingInterface op,
       numTiles = makeComposedFoldedAffineApply(
           b, op.getLoc(), divExpr, {std::get<1>(it).size, std::get<0>(it)});
     numThreads.push_back(numTiles);
+  }
+  if (op->getNumResults() == 0) {
+    return tileToForallOpImplBuffers(b, op, numThreads,
+                                     /*nominalTileSizes=*/tileSizes, mapping,
+                                     /*omitTileOffsetBoundsCheck=*/true);
   }
   return tileToForallOpImpl(b, op, numThreads,
                             /*nominalTileSizes=*/tileSizes, mapping,
