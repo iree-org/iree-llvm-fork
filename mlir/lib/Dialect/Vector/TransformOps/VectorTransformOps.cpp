@@ -69,6 +69,8 @@ void transform::LowerContractionOp::populatePatterns(
 void transform::LowerMaskOp::populatePatterns(RewritePatternSet &patterns) {
   populateVectorMaskOpLoweringPatterns(patterns);
   populateVectorMaskLoweringPatternsForSideEffectingOps(patterns);
+  populateVectorMaskMaterializationPatterns(patterns,
+                                            /*force32BitVectorIndices=*/false);
 }
 
 //===----------------------------------------------------------------------===//
