@@ -714,12 +714,35 @@ FailureOr<PackingResult> mlir::linalg::detail::buildPackingLoopNest(
 // hoistPaddingOnTensors Implementation.
 //===----------------------------------------------------------------------===//
 
-// If the original consumer of `sliceOp` was a `forOp` (i.e. through an iter
-// arg), propagate the `packedTensor` value through the same iter arg.
-// TODO: for multiple loops we need to track the use to the innermost loop.
-static Value padThroughLoopIterArg(RewriterBase &rewriter, Value packedTensor,
-                                   tensor::ExtractSliceOp sliceOp,
-                                   scf::ForOp forOp) {
+/// If the original consumer of `sliceOp` was a `forOp` (i.e. through an iter
+/// arg), propagate the `packedTensor` value through the same iter arg.
+/// TODO: for multiple loops we need to track the use to the innermost loop.
+///
+/// Match:
+/// ```
+///   %s = tensor.extract_slice ..
+///   %f = scf.for ... iter_args(%arg0 = %s) {
+///     %0 = tensor.pad %arg0
+///     %1 = compute %0
+///     %2 = tensor.extract_slice %1
+///     scf.yield %2
+///   }
+/// ```
+///
+/// and rewrite as:
+/// ```
+///   %s = tensor.extract_slice ..
+///   %0 = tensor.pad %s
+///   %f = scf.for ... iter_args(%arg0 = %0) {
+///     %1 = compute %0
+///     scf.yield %1
+///   }
+///   %2 = tensor.extract_slice %f
+/// ```
+static tensor::ExtractSliceOp
+padThroughLoopIterArg(RewriterBase &rewriter, tensor::PadOp opToHoist,
+                      Value packedTensor, tensor::ExtractSliceOp sliceOp,
+                      scf::ForOp forOp) {
   OpOperand *pUse = nullptr;
   for (OpOperand &use : sliceOp->getUses()) {
     if (use.getOwner() == forOp) {
@@ -730,19 +753,59 @@ static Value padThroughLoopIterArg(RewriterBase &rewriter, Value packedTensor,
   assert(pUse && "No slice use in the for loop");
   OpBuilder::InsertionGuard g(rewriter);
   rewriter.setInsertionPointAfter(packedTensor.getDefiningOp());
-  Value casted = rewriter.create<tensor::CastOp>(
-      packedTensor.getLoc(), pUse->get().getType(), packedTensor);
 
-  std::optional<unsigned> operandNumber =
+  std::optional<unsigned> maybeOperandNumber =
       forOp.getIterArgNumberForOpOperand(*pUse);
-  assert(operandNumber.has_value() && "expected a proper iter arg number");
+  if (!maybeOperandNumber.has_value())
+    return tensor::ExtractSliceOp();
 
+  int64_t operandNumber = maybeOperandNumber.value();
+  auto yieldOp = cast<scf::YieldOp>(forOp.getBody(0)->getTerminator());
+  auto yieldingExtractSliceOp = yieldOp->getOperand(operandNumber)
+                                    .getDefiningOp<tensor::ExtractSliceOp>();
+  if (!yieldingExtractSliceOp)
+    return tensor::ExtractSliceOp();
+
+  // TODO: check that `sliceOp` and `yieldingExtractSliceOp` are the same slice.
   SmallVector<Value> initArgs = forOp.getInitArgs();
-  initArgs[operandNumber.value()] = casted;
-  rewriter.startRootUpdate(forOp);
-  forOp.getInitArgsMutable().assign(initArgs);
-  rewriter.finalizeRootUpdate(forOp);
-  return forOp.getRegionIterArgForOpOperand(*pUse);
+  initArgs[operandNumber] = packedTensor;
+  SmallVector<Value> yieldOperands = yieldOp.getOperands();
+  yieldOperands[operandNumber] = yieldingExtractSliceOp.getSource();
+
+  int64_t numOriginalForOpResults = initArgs.size();
+  LLVM_DEBUG(DBGS() << "numOriginalForOpResults: " << numOriginalForOpResults
+                    << "\n");
+  tensor::ExtractSliceOp extracted;
+  {
+    OpBuilder::InsertionGuard g(rewriter);
+    rewriter.setInsertionPointAfter(forOp);
+    extracted = rewriter.create<tensor::ExtractSliceOp>(
+        packedTensor.getLoc(), packedTensor, sliceOp.getMixedOffsets(),
+        sliceOp.getMixedSizes(), sliceOp.getMixedStrides());
+    rewriter.replaceAllUsesWith(forOp.getResult(operandNumber), extracted);
+  }
+  scf::ForOp newForOp =
+      replaceLoopWithNewYields(rewriter, forOp, initArgs, yieldOperands);
+
+  LLVM_DEBUG(DBGS() << "newForOp results: " << newForOp.getNumResults()
+                    << "\n");
+  LLVM_DEBUG(DBGS() << "replace source of: " << extracted << "\n");
+  LLVM_DEBUG(DBGS() << "with result #"
+                    << numOriginalForOpResults + operandNumber
+                    << " of forOp, giving us: " << extracted << "\n");
+  rewriter.startRootUpdate(extracted);
+  extracted.getSourceMutable().assign(
+      newForOp.getResult(numOriginalForOpResults + operandNumber));
+  rewriter.finalizeRootUpdate(extracted);
+
+  LLVM_DEBUG(DBGS() << "replace uses of: " << opToHoist << "\n");
+  LLVM_DEBUG(DBGS() << "with region iter arg #"
+                    << numOriginalForOpResults + operandNumber << "\n");
+  rewriter.replaceAllUsesWith(
+      opToHoist,
+      newForOp.getRegionIterArg(numOriginalForOpResults + operandNumber));
+
+  return extracted;
 }
 
 /// Produce a tensor extracted from the packingResult. This can be used as a
@@ -798,8 +861,7 @@ static Value replaceByPackingResult(RewriterBase &rewriter,
   // If the consumer of `padOp` was a `forOp`, propagate through iter args.
   scf::ForOp forOp = analysis.padConsumingForOp;
   if (forOp) {
-    packedTensor =
-        padThroughLoopIterArg(rewriter, packedTensor, analysis.sliceOp, forOp);
+    return padThroughLoopIterArg(rewriter, opToHoist, packedTensor, analysis.sliceOp, forOp);
   }
 
   // offsets = [maybe_leading_ivs, 0 .. 0].
