@@ -564,6 +564,20 @@ private:
   /// These are also the keys for "mappings".
   SmallVector<Region *> regionStack;
 #endif // LLVM_ENABLE_ABI_BREAKING_CHECKS
+
+#ifndef NDEBUG
+  /// This cache stores operation names for operations that are tracked in the
+  /// transform dialect state. It is used to detect missing memory side effects
+  /// and op tracking.
+  ///
+  /// All tracked ops are added to this cache before a transform op is applied.
+  /// After the application of the transform op, the names of all tracked ops
+  /// are compared with the names in the cache. If there is a mismatch (or a
+  /// crash), op tracking is missing somewhere. This is typically a missing
+  /// "consumesHandle" side effect or a pattern that removes an op without
+  /// notifying a TrackingListener.
+  DenseMap<Operation *, OperationName> cachedNames;
+#endif // NDEBUG
 };
 
 /// Local mapping between values defined by a specific op implementing the

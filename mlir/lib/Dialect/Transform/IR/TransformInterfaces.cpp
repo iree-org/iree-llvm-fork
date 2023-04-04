@@ -343,6 +343,13 @@ transform::TransformState::replacePayloadOp(Operation *op,
     (void)getHandlesForPayloadValue(opResult, valueHandles);
     assert(valueHandles.empty() && "expected no mapping to old results");
   }
+
+  if (options.getExpensiveChecksEnabled()) {
+    auto it = cachedNames.find(op);
+    assert(it != cachedNames.end() && "entry not found");
+    assert(it->second == op->getName() && "operation name mismatch");
+    cachedNames.erase(it);
+  }
 #endif // NDEBUG
 
   // TODO: consider invalidating the handles to nested objects here.
@@ -356,6 +363,16 @@ transform::TransformState::replacePayloadOp(Operation *op,
     }
     return success();
   }
+
+#ifndef NDEBUG
+  if (options.getExpensiveChecksEnabled()) {
+    auto insertion = cachedNames.insert({replacement, replacement->getName()});
+    if (!insertion.second) {
+      assert(insertion.first->second == replacement->getName() &&
+             "operation is already cached with a different name");
+    }
+  }
+#endif // NDEBUG
 
   // Otherwise, replace the pointed-to object of all handles while preserving
   // their relative order. First, replace the mapped operation if present.
@@ -716,6 +733,23 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
         FULL_LDBG("--not a TransformHandle -> SKIP AND DROP ON THE FLOOR\n");
       }
     }
+
+#ifndef NDEBUG
+    // Cache Operation* -> OperationName mappings. These will be checked after
+    // the transform has been applied to detect incorrect memory side effects
+    // and missing op tracking.
+    for (auto &it : mappings) {
+      Mappings &mapping = it.second;
+      for (auto &it : mapping.reverse) {
+        Operation *op = it.first;
+        auto insertion = cachedNames.insert({op, op->getName()});
+        if (!insertion.second) {
+          assert(insertion.first->second == op->getName() &&
+                 "operation is already cached with a different name");
+        }
+      }
+    }
+#endif // NDEBUG
   }
 
   // Find which operands are consumed.
@@ -742,11 +776,23 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
   // IR after that.
   SmallVector<Value> origOpFlatResults;
   SmallVector<Operation *> origAssociatedOps;
+#ifndef NDEBUG
+  DenseSet<Operation *> consumedPayloadOps;
+#endif // NDEBUG
   for (unsigned index : consumedOperands) {
     Value operand = transform->getOperand(index);
     if (operand.getType().isa<TransformHandleTypeInterface>()) {
-      for (Operation *payloadOp : getPayloadOps(operand))
+      for (Operation *payloadOp : getPayloadOps(operand)) {
         llvm::append_range(origOpFlatResults, payloadOp->getResults());
+#ifndef NDEBUG
+        if (options.getExpensiveChecksEnabled()) {
+          // Store all consumed payload ops (and their nested ops) in a set for
+          // extra error checking.
+          payloadOp->walk(
+              [&](Operation *op) { consumedPayloadOps.insert(op); });
+        }
+#endif // NDEBUG
+      }
       continue;
     }
     if (operand.getType().isa<TransformValueHandleTypeInterface>()) {
@@ -805,6 +851,49 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
       forgetValueMapping(operand, origAssociatedOps);
     }
   }
+
+#ifndef NDEBUG
+  if (options.getExpensiveChecksEnabled()) {
+    // Check cached operation names.
+    for (auto &it : mappings) {
+      Mappings &mapping = it.second;
+      for (auto &it : mapping.reverse) {
+        Operation *op = it.first;
+        if (consumedPayloadOps.contains(op)) {
+          // This payload op was consumed but it is still mapped to one or
+          // multiple handles. Erase the op from all mappings, so that there are
+          // no dangling pointers in the transform dialect state. This is
+          // necessary so that the `cachedNames`-based checks work correctly.
+          //
+          // Note: Dangling pointers to erased payload ops are allowed if the
+          // corresponding handles are not used anymore. There is another
+          // "expensive-check" that looks for future uses of dangling payload op
+          // pointers (through arbitrary handles). Removing consumed payload ops
+          // from all handles does not weaken any extra checks that we are doing
+          // here.
+          for (Value handle : it.second) {
+            auto it = llvm::find(mapping.direct[handle], op);
+            assert(it != mapping.direct[handle].end() &&
+                   "inconsistent mapping state");
+            mapping.direct[handle].erase(it);
+          }
+          mapping.reverse.erase(op);
+          cachedNames.erase(op);
+          continue;
+        }
+        // Make sure that the name of the op has not changed. If it has changed,
+        // the op was removed and a new op was allocated at the same memory
+        // location. This means that we are missing op tracking somewhere.
+        auto cacheIt = cachedNames.find(op);
+        assert(cacheIt != cachedNames.end() && "operation not in cache");
+        // If the `getName` call is crashing, we have a dangling pointer. This
+        // usually means that an op is erased but the transform dialect was not
+        // made aware of that; e.g., missing "consumesHandle" or rewriter usage.
+        assert(cacheIt->second == op->getName() && "operation name mismatch");
+      }
+    }
+  }
+#endif // NDEBUG
 
   for (OpResult result : transform->getResults()) {
     assert(result.getDefiningOp() == transform.getOperation() &&

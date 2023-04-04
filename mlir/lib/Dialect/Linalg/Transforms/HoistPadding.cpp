@@ -77,7 +77,8 @@ static void debugPrintBackwardSlice(SetVector<Operation *> &backwardSlice) {
 ///   8. There is no enclosing scf::ForOp that indexes the padded data.
 /// Other cases succeed and will trigger hoisting of the pad op.
 struct HoistingAnalysis {
-  HoistingAnalysis(tensor::PadOp padOp, int numLoops);
+  HoistingAnalysis(tensor::PadOp padOp, int numLoops,
+                   OpBuilder::Listener *listener);
 
   bool isValid() { return valid; }
 
@@ -179,7 +180,8 @@ static void computeBackwardSlice(tensor::PadOp padOp,
                    /*inclusive=*/true);
 }
 
-HoistingAnalysis::HoistingAnalysis(tensor::PadOp padOp, int numLoops) {
+HoistingAnalysis::HoistingAnalysis(tensor::PadOp padOp, int numLoops,
+                                   OpBuilder::Listener *listener) {
   valid = false;
 
   // Get at most `numLoops` of immediately enclosing loops.
@@ -215,7 +217,7 @@ HoistingAnalysis::HoistingAnalysis(tensor::PadOp padOp, int numLoops) {
   // If the padded data is not yet available before entering the outermost
   // enclosing loop, try to apply hoisting on this outermost loop.
   // TODO: we may want finer-grained hoisting of only that particular `sliceOp`.
-  IRRewriter rewriter(outermostEnclosingForOp->getContext());
+  IRRewriter rewriter(outermostEnclosingForOp->getContext(), listener);
   if (!outermostEnclosingForOp.isDefinedOutsideOfLoop(sliceOp.getSource())) {
     outermostEnclosingForOp =
         hoistRedundantSubsetExtractInsert(rewriter, outermostEnclosingForOp);
@@ -657,7 +659,7 @@ FailureOr<Value> mlir::linalg::hoistPaddingOnTensors(
     SmallVectorImpl<GenericOp> &transposeOps) {
   LLVM_DEBUG(DBGS() << "\n"; DBGS() << " Try to hoist " << *(opToHoist) << "\n";
              DBGS() << " by " << numLoops << " loops\n");
-  HoistingAnalysis analysis(opToHoist, numLoops);
+  HoistingAnalysis analysis(opToHoist, numLoops, rewriter.getListener());
   if (!analysis.isValid()) {
     LLVM_DEBUG(DBGS() << "--Analysis failed -> Skip\n");
     return failure();
