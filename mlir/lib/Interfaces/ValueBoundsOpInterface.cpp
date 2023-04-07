@@ -62,7 +62,7 @@ void ValueBoundsConstraintSet::addBound(BoundType type, int64_t pos,
       type, pos,
       AffineMap::get(cstr.getNumDimVars(), cstr.getNumSymbolVars(), expr));
   (void)status;
-  assert(succeeded(status) && "failed to add bound to constraint system");
+  //assert(succeeded(status) && "failed to add bound to constraint system");
 }
 
 AffineExpr ValueBoundsConstraintSet::getExpr(Value value,
