@@ -2921,6 +2921,7 @@ cc_library(
         ":SCFPassIncGen",
         ":Support",
         ":TensorDialect",
+        ":ValueBoundsOpInterface",
         ":ViewLikeInterface",
         "//llvm:Support",
     ],
