@@ -442,10 +442,10 @@ void transform::TransformState::recordOpHandleInvalidationOne(
       llvm::dbgs() << "\n");
   for (Operation *ancestor : potentialAncestors) {
     // clang-format off
-    DEBUG_WITH_TYPE(DEBUG_TYPE_FULL, 
+    DEBUG_WITH_TYPE(DEBUG_TYPE_FULL,
       { (DBGS() << "----handle one ancestor: " << *ancestor << "\n"); });
-    DEBUG_WITH_TYPE(DEBUG_TYPE_FULL, 
-      { (DBGS() << "----of payload with name: " 
+    DEBUG_WITH_TYPE(DEBUG_TYPE_FULL,
+      { (DBGS() << "----of payload with name: "
                 << payloadOp->getName().getIdentifier() << "\n"); });
     DEBUG_WITH_TYPE(DEBUG_TYPE_FULL,
       { (DBGS() << "----of payload: " << *payloadOp << "\n"); });
@@ -877,7 +877,7 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
     }
 
     // Check cached operation names.
-    for (Mappings &mapping : lllvm::make_second_range(mappings)) {
+    for (Mappings &mapping : llvm::make_second_range(mappings)) {
       for (Operation *op : llvm::make_first_range(mapping.reverse)) {
         // Make sure that the name of the op has not changed. If it has changed,
         // the op was removed and a new op was allocated at the same memory
