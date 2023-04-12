@@ -750,7 +750,7 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
                 emitDefiniteFailure(transform->getLoc())
                 << "expensive checks failure: operation mismatch, expected "
                 << insertion.first->second;
-            diag.attachNote(op) << "payload op: " << op->getName();
+            diag.attachNote(op->getLoc()) << "payload op: " << op->getName();
             return diag;
           }
         }
@@ -894,7 +894,7 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
           DiagnosedDefiniteFailure diag =
               emitDefiniteFailure(transform->getLoc())
               << "expensive checks failure: operation not found in cache";
-          diag.attachNote(op) << "payload op";
+          diag.attachNote(op->getLoc()) << "payload op";
           return diag;
         }
         // If the `getName` call (or the above `attachNote`) is crashing, we
@@ -906,7 +906,7 @@ transform::TransformState::applyTransform(TransformOpInterface transform) {
               emitDefiniteFailure(transform->getLoc())
               << "expensive checks failure: operation mismatch, expected "
               << cacheIt->second;
-          diag.attachNote(op) << "payload op: " << op->getName();
+          diag.attachNote(op->getLoc()) << "payload op: " << op->getName();
           return diag;
         }
       }
