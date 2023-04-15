@@ -5729,8 +5729,9 @@ void mlir::vector::populateVectorToVectorCanonicalizationPatterns(
   patterns
       .add<CreateMaskFolder, MaskedLoadFolder, MaskedStoreFolder, GatherFolder,
            ScatterFolder, ExpandLoadFolder, CompressStoreFolder,
-           StridedSliceConstantMaskFolder, TransposeFolder>(
+           StridedSliceConstantMaskFolder>(
           patterns.getContext(), benefit);
+  TransposeOp::getCanonicalizationPatterns(patterns, patterns.getContext());
 }
 
 //===----------------------------------------------------------------------===//
