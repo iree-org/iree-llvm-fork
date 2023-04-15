@@ -44,6 +44,7 @@ enum class AtomicRMWKind : uint64_t;
 } // namespace arith
 
 namespace vector {
+class ContractionOp;
 class TransferReadOp;
 class TransferWriteOp;
 class VectorDialect;
@@ -75,6 +76,9 @@ void populateVectorToVectorCanonicalizationPatterns(RewritePatternSet &patterns,
 /// Collect a set of vector.shape_cast folding patterns.
 void populateShapeCastFoldingPatterns(RewritePatternSet &patterns,
                                       PatternBenefit benefit = 1);
+
+LogicalResult castAwayContractionLeadingOneDim(vector::ContractionOp contractOp,
+                                               RewriterBase &rewriter);
 
 /// Collect a set of leading one dimension removal patterns.
 ///
