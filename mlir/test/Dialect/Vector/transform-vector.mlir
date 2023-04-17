@@ -1,4 +1,5 @@
-// RUN: mlir-opt %s --test-transform-dialect-interpreter --split-input-file | FileCheck %s
+// RUN: mlir-opt %s --test-transform-dialect-interpreter -cse -canonicalize \
+// RUN:     --split-input-file | FileCheck %s
 
 // CHECK-LABEL: func @matmul_tensors
 func.func @matmul_tensors(
@@ -6,7 +7,7 @@ func.func @matmul_tensors(
     -> tensor<8x32xf32> {
 // CHECK-NOT: linalg
 // CHECK: vector.extract {{.*}} : vector<8x4xf32>
-// CHECK: vector.store {{.*}} : memref<8x32xf32>, vector<4xf32>
+// CHECK: vector.store {{.*}} : memref<8x4xf32, strided<[32, 1], offset: ?>>, vector<4xf32>
   %0 = linalg.matmul  ins(%arg0, %arg1: tensor<8x16xf32>, tensor<16x32xf32>)
                      outs(%arg2: tensor<8x32xf32>)
     -> tensor<8x32xf32>

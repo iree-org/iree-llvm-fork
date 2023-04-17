@@ -39,6 +39,7 @@ func.func @vectorize_keep_pad(
   %0 = affine.min #map0()[%arg5]
   %1 = tensor.extract_slice %arg0[%arg3, %arg5] [4, %0] [1, 1] : tensor<24x12xf32> to tensor<4x?xf32>
   %2 = tensor.extract_slice %arg1[%arg5, %arg4] [%0, 5] [1, 1] : tensor<12x25xf32> to tensor<?x5xf32>
+  // CHECK: %[[sC:.*]] = tensor.extract_slice %[[C]]
   %3 = tensor.extract_slice %arg2[%arg3, %arg4] [4, 5] [1, 1] : tensor<24x25xf32> to tensor<4x5xf32>
   %4 = affine.apply #map1()[%0]
   // CHECK: %[[pA:.*]] = tensor.pad
@@ -54,9 +55,9 @@ func.func @vectorize_keep_pad(
   } : tensor<?x5xf32> to tensor<7x5xf32>
   // CHECK: %[[vA:.+]] = vector.transfer_read %[[pA]]
   // CHECK: %[[vB:.+]] = vector.transfer_read %[[pB]]
-  // CHECK: %[[vC:.+]] = vector.transfer_read %[[C]]
+  // CHECK: %[[vC:.+]] = vector.transfer_read %[[sC]]
   // CHECK: %[[vR:.+]] = vector.contract {{.*}} %[[vA]], %[[vB]], %[[vC]]
-  // CHECK: vector.transfer_write %[[vR]], %[[C]]
+  // CHECK: vector.transfer_write %[[vR]], %[[sC]]
   %8 = linalg.matmul ins(%5, %7 : tensor<4x7xf32>, tensor<7x5xf32>) outs(%3 : tensor<4x5xf32>) -> tensor<4x5xf32>
   %9 = tensor.insert_slice %8 into %arg2[%arg3, %arg4] [4, 5] [1, 1] : tensor<4x5xf32> into tensor<24x25xf32>
   return %9 : tensor<24x25xf32>
@@ -87,6 +88,7 @@ func.func @vectorize_pad(
   %0 = affine.min #map0()[%arg5]
   // CHECK: %[[sA:.+]] = tensor.extract_slice %[[A]]
   // CHECK: %[[sB:.+]] = tensor.extract_slice %[[B]]
+  // CHECK: %[[sC:.+]] = tensor.extract_slice %[[C]]
   %1 = tensor.extract_slice %arg0[%arg3, %arg5] [4, %0] [1, 1] : tensor<24x12xf32> to tensor<4x?xf32>
   %2 = tensor.extract_slice %arg1[%arg5, %arg4] [%0, 5] [1, 1] : tensor<12x25xf32> to tensor<?x5xf32>
   %3 = tensor.extract_slice %arg2[%arg3, %arg4] [4, 5] [1, 1] : tensor<24x25xf32> to tensor<4x5xf32>
@@ -102,9 +104,9 @@ func.func @vectorize_pad(
   ^bb0(%arg6: index, %arg7: index):
     tensor.yield %cst : f32
   } : tensor<?x5xf32> to tensor<7x5xf32>
-  // CHECK: %[[vC:.+]] = vector.transfer_read %[[C]]
+  // CHECK: %[[vC:.+]] = vector.transfer_read %[[sC]]
   // CHECK: %[[vR:.+]] = vector.contract {{.*}} %[[vA]], %[[vB]], %[[vC]]
-  // CHECK: vector.transfer_write %[[vR]], %[[C]]
+  // CHECK: vector.transfer_write %[[vR]], %[[sC]]
   %8 = linalg.matmul ins(%5, %7 : tensor<4x7xf32>, tensor<7x5xf32>) outs(%3 : tensor<4x5xf32>) -> tensor<4x5xf32>
   %9 = tensor.insert_slice %8 into %arg2[%arg3, %arg4] [4, 5] [1, 1] : tensor<4x5xf32> into tensor<24x25xf32>
   return %9 : tensor<24x25xf32>
