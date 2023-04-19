@@ -962,7 +962,8 @@ static ForOp replaceTensorCastForOpIterArg(PatternRewriter &rewriter,
 ///     %2 = call @do(%iter_t0) : (tensor<?x?xf32>) -> tensor<?x?xf32>
 ///     scf.yield %2 : tensor<?x?xf32>
 ///   }
-///   use_of(%1)
+///   %2 = tensor.cast %1 : tensor<?x?xf32> to tensor<32x1024xf32>
+///   use_of(%2)
 /// ```
 ///
 /// folds into:
@@ -975,8 +976,7 @@ static ForOp replaceTensorCastForOpIterArg(PatternRewriter &rewriter,
 ///     %4 = tensor.cast %3 : tensor<?x?xf32> to tensor<32x1024xf32>
 ///     scf.yield %4 : tensor<32x1024xf32>
 ///   }
-///   %1 = tensor.cast %0 : tensor<32x1024xf32> to tensor<?x?xf32>
-///   use_of(%1)
+///   use_of(%0)
 /// ```
 struct ForOpTensorCastFolder : public OpRewritePattern<ForOp> {
   using OpRewritePattern<ForOp>::OpRewritePattern;
@@ -988,13 +988,16 @@ struct ForOpTensorCastFolder : public OpRewritePattern<ForOp> {
       auto incomingCast = iterOpOperand.get().getDefiningOp<tensor::CastOp>();
       if (!incomingCast)
         continue;
-      // If the dest type of the cast does not preserve static information in
-      // the source type.
-      if (!tensor::preservesStaticInformation(
-              incomingCast.getDest().getType(),
-              incomingCast.getSource().getType()))
-        continue;
       if (!std::get<1>(it).hasOneUse())
+        continue;
+      auto outgoingCastOp =
+          dyn_cast<tensor::CastOp>(*std::get<1>(it).user_begin());
+      if (!outgoingCastOp)
+        continue;
+
+      // Must be a tensor.cast op pair with matching types.
+      if (outgoingCastOp.getResult().getType() !=
+          incomingCast.getSource().getType())
         continue;
 
       // Create a new ForOp with that iter operand replaced.
