@@ -1439,8 +1439,11 @@ packMatmulGreedily(RewriterBase &rewriter, LinalgOp linalgOp,
 DiagnosedSilenceableFailure
 PackGreedilyOp::apply(transform::TransformResults &transformResults,
                       transform::TransformState &state) {
-  ArrayRef<Operation *> targetOps = state.getPayloadOps(getTarget());
-
+  ArrayRef<Operation *> targetOpsView = state.getPayloadOps(getTarget());
+  // Store payload ops into a separate SmallVector because the TrackingListener
+  // removes erased ops from the transform state.
+  SmallVector<Operation *> targetOps(targetOpsView.begin(),
+                                     targetOpsView.end());
   SmallVector<Operation *> results;
   TrackingListener listener(state, *this);
   IRRewriter rewriter(getContext(), &listener);
