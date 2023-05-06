@@ -2716,6 +2716,73 @@ struct FoldTargetTensorCast : public OpRewritePattern<PadOp> {
   }
 };
 
+static SmallVector<ExtractSliceOp> getExtractSliceChain(PadOp padOp) {
+  SmallVector<ExtractSliceOp> extractSlices;
+  ExtractSliceOp currentSlice =
+      padOp.getSource().getDefiningOp<ExtractSliceOp>();
+  while (currentSlice) {
+    extractSlices.push_back(currentSlice);
+    currentSlice = currentSlice.getSource().getDefiningOp<ExtractSliceOp>();
+  }
+
+  return SmallVector<ExtractSliceOp>(extractSlices.rbegin(),
+                                     extractSlices.rend());
+}
+
+static SmallVector<OpFoldResult>
+combineMixedOffsets(PatternRewriter &rewriter, int64_t rank,
+                    ArrayRef<ExtractSliceOp> slices) {
+  SmallVector<OpFoldResult> combinedOffsets(rank, rewriter.getIndexAttr(0));
+  for (ExtractSliceOp sliceOp : slices) {
+    auto offsets = sliceOp.getMixedOffsets();
+
+    for (auto [idx, offset] : llvm::enumerate(offsets)) {
+      OpFoldResult combinedOffset = combinedOffsets[idx];
+      auto maybeCombinedConstant = getConstantIntValue(combinedOffset);
+      auto maybeOffsetConstant = getConstantIntValue(offset);
+      if (maybeCombinedConstant.has_value() && maybeOffsetConstant.has_value()) {
+        combinedOffsets[idx] = rewriter.getIndexAttr(
+            maybeCombinedConstant.value() + maybeOffsetConstant.value());
+        continue;
+      }
+      // Constant + value.
+      if (maybeCombinedConstant.has_value() && offset.is<Value>()) {
+        if (maybeCombinedConstant.value() != 0) {
+          return {};
+        }
+        combinedOffsets[idx] = offset.get<Value>();
+        continue;
+      }
+      // Value + constant.
+      if (maybeOffsetConstant.has_value() && combinedOffset.is<Value>()) {
+        if (maybeOffsetConstant.value() != 0) {
+          return {};
+        }
+        combinedOffsets[idx] = combinedOffset.get<Value>();
+        continue;
+      }
+
+      // Both are values.
+      Value combinedVal = combinedOffset.get<Value>();
+      Value offsetVal = offset.get<Value>();
+      assert(combinedVal && offsetVal && "Unexpected non Value offsets");
+      OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointAfterValue(offsetVal);
+
+      AffineExpr offsetAddExpr = getAffineBinaryOpExpr(
+          AffineExprKind::Add, rewriter.getAffineDimExpr(0),
+          rewriter.getAffineDimExpr(1));
+      auto offsetAddMap =
+          AffineMap::get(/*dimCount=*/2, /*symbolCount=*/0, offsetAddExpr);
+      auto affineApplyOp = rewriter.create<affine::AffineApplyOp>(
+          sliceOp.getLoc(), offsetAddMap, ValueRange({combinedVal, offsetVal}));
+      combinedOffsets[idx] = affineApplyOp.getResult();
+    }
+  }
+
+  return combinedOffsets;
+}
+
 /// Fold chains of tensor::ExtractSliceOp, tensor::PadOp pairs that pad
 /// different dimensions. The pattern applies if the following preconditions
 /// hold:
@@ -2756,28 +2823,34 @@ struct FoldOrthogonalPaddings : public OpRewritePattern<PadOp> {
 
   LogicalResult matchAndRewrite(PadOp padOp,
                                 PatternRewriter &rewriter) const override {
-    auto innerSliceOp = padOp.getSource().getDefiningOp<ExtractSliceOp>();
-    if (!innerSliceOp)
+    SmallVector<ExtractSliceOp> innerSlices = getExtractSliceChain(padOp);
+    if (innerSlices.empty())
       return failure();
-    auto outerPadOp = innerSliceOp.getSource().getDefiningOp<PadOp>();
+    ExtractSliceOp topInnerSliceOp = innerSlices.front();
+
+    auto outerPadOp = topInnerSliceOp.getSource().getDefiningOp<PadOp>();
     if (!outerPadOp || outerPadOp.getNofold())
       return failure();
-    auto outerSliceOp = outerPadOp.getSource().getDefiningOp<ExtractSliceOp>();
-    if (!outerSliceOp)
+
+    SmallVector<ExtractSliceOp> outerSlices = getExtractSliceChain(outerPadOp);
+    if (outerSlices.empty())
       return failure();
+    ExtractSliceOp topOuterSliceOp = outerSlices.front();
 
     // 1) Fail if the chain is rank-reducing.
     int64_t rank = padOp.getSourceType().getRank();
-    if (outerSliceOp.getSourceType().getRank() != rank) {
+    if (topOuterSliceOp.getSourceType().getRank() != rank)
       return rewriter.notifyMatchFailure(padOp,
                                          "cannot fold rank-reducing chain");
-    }
-
     // 2) Fail if the tensor::ExtractSliceOps have non-unit strides.
-    if (!innerSliceOp.hasUnitStride() || !outerSliceOp.hasUnitStride()) {
+    auto hasNoUnitStride = [](ArrayRef<ExtractSliceOp> slices) {
+      return any_of(slices,
+                    [](ExtractSliceOp op) { return !op.hasUnitStride(); });
+    };
+
+    if (hasNoUnitStride(innerSlices) || hasNoUnitStride(outerSlices))
       return rewriter.notifyMatchFailure(
           padOp, "cannot fold non-unit stride ExtractSliceOps");
-    }
 
     // 3) Fail if the tensor::PadOps have non-zero low padding.
     if (!padOp.hasZeroLowPad() || !outerPadOp.hasZeroLowPad()) {
@@ -2810,10 +2883,20 @@ struct FoldOrthogonalPaddings : public OpRewritePattern<PadOp> {
     // for every dimension, and use the offset the other pair. Fail if no
     // zero-offset and zero-padding tensor::ExtractSliceOp, tensor::PadOp pair
     // exists.
+    //
+    SmallVector<OpFoldResult> combinedInnerOffsets =
+        combineMixedOffsets(rewriter, rank, innerSlices);
+    SmallVector<OpFoldResult> combinedOuterOffsets =
+        combineMixedOffsets(rewriter, rank, outerSlices);
+    if (innerSlices.empty() || outerSlices.empty())
+      return rewriter.notifyMatchFailure(padOp,
+                                         "cannot combine extract slice chain");
+
     SmallVector<OpFoldResult> newOffsets(rank, rewriter.getIndexAttr(0));
     for (auto en : enumerate(newOffsets)) {
-      OpFoldResult innerOffset = innerSliceOp.getMixedOffsets()[en.index()];
-      OpFoldResult outerOffset = outerSliceOp.getMixedOffsets()[en.index()];
+      OpFoldResult innerOffset = combinedInnerOffsets[en.index()];
+      OpFoldResult outerOffset = combinedOuterOffsets[en.index()];
+
       if (!innerDims.test(en.index()) &&
           (getConstantIntValue(innerOffset) == static_cast<int64_t>(0))) {
         en.value() = outerOffset;
@@ -2833,20 +2916,19 @@ struct FoldOrthogonalPaddings : public OpRewritePattern<PadOp> {
     // outer tensor::PadOp and fail if the size of the inner
     // tensor::ExtractSliceOp does not match the size of the padded dimension.
     // Otherwise, take the size of the inner tensor::ExtractSliceOp.
-    SmallVector<OpFoldResult> newSizes = innerSliceOp.getMixedSizes();
-    for (auto en : enumerate(newSizes)) {
-      if (!outerDims.test(en.index()))
+    SmallVector<OpFoldResult> newSizes = innerSlices.back().getMixedSizes();
+    for (auto [idx, sliceSize] : enumerate(newSizes)) {
+      if (!outerDims.test(idx))
         continue;
-      OpFoldResult sliceSize = innerSliceOp.getMixedSizes()[en.index()];
-      int64_t sourceSize = innerSliceOp.getSourceType().getShape()[en.index()];
+      int64_t sourceSize = topInnerSliceOp.getSourceType().getShape()[idx];
       assert(!ShapedType::isDynamic(sourceSize) &&
              "expected padded dimension to have a static size");
-      if (getConstantIntValue(sliceSize) != sourceSize) {
+      if (getConstantIntValue(sliceSize).value() != sourceSize) {
         return rewriter.notifyMatchFailure(
             padOp, "cannot fold since the inner ExtractSliceOp size does not "
                    "match the size of the outer padding");
       }
-      en.value() = outerSliceOp.getMixedSizes()[en.index()];
+      newSizes[idx] = outerSlices.back().getMixedSizes()[idx];
     }
 
     // Combine the high paddings of the two tensor::PadOps.
@@ -2854,6 +2936,7 @@ struct FoldOrthogonalPaddings : public OpRewritePattern<PadOp> {
     for (auto en : enumerate(newHighPad)) {
       if (innerDims.test(en.index()))
         newHighPad[en.index()] = padOp.getMixedHighPad()[en.index()];
+
       if (outerDims.test(en.index()))
         newHighPad[en.index()] = outerPadOp.getMixedHighPad()[en.index()];
     }
@@ -2861,14 +2944,15 @@ struct FoldOrthogonalPaddings : public OpRewritePattern<PadOp> {
     // Create a new tensor::ExtractSliceOp, tensor::PadOp pair that performs
     // the two paddings in one step.
     auto newSliceOp = rewriter.create<ExtractSliceOp>(
-        padOp.getLoc(), outerSliceOp.getSource(), newOffsets, newSizes,
-        innerSliceOp.getMixedStrides());
+        padOp.getLoc(), topOuterSliceOp.getSource(), newOffsets, newSizes,
+        innerSlices.back().getMixedStrides());
     auto newPadOp = rewriter.create<PadOp>(
         padOp.getLoc(), padOp.getResultType(), newSliceOp.getResult(),
         padOp.getMixedLowPad(), newHighPad, padOp.getNofold(),
         getPrunedAttributeList(padOp, PadOp::getAttributeNames()));
     rewriter.inlineRegionBefore(padOp.getRegion(), newPadOp.getRegion(),
                                 newPadOp.getRegion().begin());
+
     rewriter.replaceOp(padOp, newPadOp.getResult());
     return success();
   }
