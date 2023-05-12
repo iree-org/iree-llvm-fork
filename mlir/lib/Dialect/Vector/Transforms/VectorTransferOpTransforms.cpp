@@ -288,6 +288,14 @@ static int getReducedRank(ArrayRef<int64_t> shape) {
   return llvm::count_if(shape, [](int64_t dimSize) { return dimSize != 1; });
 }
 
+static SmallVector<int64_t> getReducedShape(ArrayRef<int64_t> shape) {
+  SmallVector<int64_t> reducedShape;
+  llvm::copy_if(shape, std::back_inserter(reducedShape),
+                [](int64_t dimSize) { return dimSize != 1; });
+  return reducedShape;
+}
+
+
 /// Returns true if all values are `arith.constant 0 : index`
 static bool isZero(Value v) {
   auto cst = v.getDefiningOp<arith::ConstantIndexOp>();
@@ -320,9 +328,9 @@ class TransferReadDropUnitDimsPattern
     int reducedRank = getReducedRank(sourceType.getShape());
     if (reducedRank == sourceType.getRank())
       return failure(); // The source shape can't be further reduced.
-    if (reducedRank != vectorType.getRank())
-      return failure(); // This pattern requires the vector shape to match the
-                        // reduced source shape.
+    int vectorReducedRank = getReducedRank(vectorType.getShape());
+    if (reducedRank != vectorReducedRank)
+      return failure();
     if (llvm::any_of(transferReadOp.getIndices(),
                      [](Value v) { return !isZero(v); }))
       return failure();
@@ -331,8 +339,15 @@ class TransferReadDropUnitDimsPattern
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     SmallVector<Value> zeros(reducedRank, c0);
     auto identityMap = rewriter.getMultiDimIdentityMap(reducedRank);
-    rewriter.replaceOpWithNewOp<vector::TransferReadOp>(
-        transferReadOp, vectorType, reducedShapeSource, zeros, identityMap);
+    VectorType reducedVectorType = VectorType::get(
+        getReducedShape(vectorType.getShape()), vectorType.getElementType());
+
+    auto newTransferReadOp = rewriter.create<vector::TransferReadOp>(
+        loc, reducedVectorType, reducedShapeSource, zeros, identityMap);
+    auto shapeCast = rewriter.createOrFold<vector::ShapeCastOp>(
+        loc, vectorType, newTransferReadOp);
+    rewriter.replaceOp(transferReadOp, shapeCast);
+
     return success();
   }
 };
@@ -361,11 +376,12 @@ class TransferWriteDropUnitDimsPattern
     if (!transferWriteOp.getPermutationMap().isMinorIdentity())
       return failure();
     int reducedRank = getReducedRank(sourceType.getShape());
+    // The source shape can't be further reduced.
     if (reducedRank == sourceType.getRank())
-      return failure(); // The source shape can't be further reduced.
-    if (reducedRank != vectorType.getRank())
-      return failure(); // This pattern requires the vector shape to match the
-                        // reduced source shape.
+      return failure();
+    int vectorReducedRank = getReducedRank(vectorType.getShape());
+    if (reducedRank != vectorReducedRank)
+      return failure();
     if (llvm::any_of(transferWriteOp.getIndices(),
                      [](Value v) { return !isZero(v); }))
       return failure();
@@ -374,8 +390,15 @@ class TransferWriteDropUnitDimsPattern
     Value c0 = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     SmallVector<Value> zeros(reducedRank, c0);
     auto identityMap = rewriter.getMultiDimIdentityMap(reducedRank);
+    VectorType reducedVectorType = VectorType::get(
+        getReducedShape(vectorType.getShape()), vectorType.getElementType());
+
+    auto shapeCast = rewriter.createOrFold<vector::ShapeCastOp>(
+        loc, reducedVectorType, vector);
     rewriter.replaceOpWithNewOp<vector::TransferWriteOp>(
-        transferWriteOp, vector, reducedShapeSource, zeros, identityMap);
+        transferWriteOp, shapeCast, reducedShapeSource, zeros,
+        identityMap);
+
     return success();
   }
 };
