@@ -785,10 +785,9 @@ LogicalResult transform::ForeachMatchOp::verifySymbolUses(
 DiagnosedSilenceableFailure
 transform::ForeachOp::apply(transform::TransformResults &results,
                             transform::TransformState &state) {
-  ArrayRef<Operation *> payloadOps = state.getPayloadOps(getTarget());
   SmallVector<SmallVector<Operation *>> resultOps(getNumResults(), {});
 
-  for (Operation *op : payloadOps) {
+  for (Operation *op : state.getPayloadOps(getTarget())) {
     auto scope = state.make_region_scope(getBody());
     if (failed(state.mapBlockArguments(getIterationVariable(), {op})))
       return DiagnosedSilenceableFailure::definiteFailure();
@@ -803,8 +802,7 @@ transform::ForeachOp::apply(transform::TransformResults &results,
 
     // Append yielded payload ops to result list (if any).
     for (unsigned i = 0; i < getNumResults(); ++i) {
-      ArrayRef<Operation *> yieldedOps =
-          state.getPayloadOps(getYieldOp().getOperand(i));
+      auto yieldedOps = state.getPayloadOps(getYieldOp().getOperand(i));
       resultOps[i].append(yieldedOps.begin(), yieldedOps.end());
     }
   }
@@ -900,16 +898,16 @@ DiagnosedSilenceableFailure
 transform::GetConsumersOfResult::apply(transform::TransformResults &results,
                                        transform::TransformState &state) {
   int64_t resultNumber = getResultNumber();
-  ArrayRef<Operation *> payloadOps = state.getPayloadOps(getTarget());
-  if (payloadOps.empty()) {
-    results.set(getResult().cast<OpResult>(), {});
+  auto payloadOps = state.getPayloadOps(getTarget());
+  if (std::empty(payloadOps)) {
+    results.set(cast<OpResult>(getResult()), {});
     return DiagnosedSilenceableFailure::success();
   }
-  if (payloadOps.size() != 1)
+  if (!llvm::hasSingleElement(payloadOps))
     return emitDefiniteFailure()
            << "handle must be mapped to exactly one payload op";
 
-  Operation *target = payloadOps.front();
+  Operation *target = *payloadOps.begin();
   if (target->getNumResults() <= resultNumber)
     return emitDefiniteFailure() << "result number overflow";
   results.set(getResult().cast<OpResult>(),
@@ -1501,7 +1499,7 @@ void transform::SplitHandleOp::build(OpBuilder &builder, OperationState &result,
 DiagnosedSilenceableFailure
 transform::SplitHandleOp::apply(transform::TransformResults &results,
                                 transform::TransformState &state) {
-  int64_t numPayloadOps = state.getPayloadOps(getHandle()).size();
+  int64_t numPayloadOps = llvm::range_size(state.getPayloadOps(getHandle()));
   auto produceNumOpsError = [&]() {
     return emitSilenceableError()
            << getHandle() << " expected to contain " << this->getNumResults()
@@ -1591,11 +1589,12 @@ void transform::PDLMatchOp::getEffects(
 DiagnosedSilenceableFailure
 transform::ReplicateOp::apply(transform::TransformResults &results,
                               transform::TransformState &state) {
-  unsigned numRepetitions = state.getPayloadOps(getPattern()).size();
+  unsigned numRepetitions = llvm::range_size(state.getPayloadOps(getPattern()));
   for (const auto &en : llvm::enumerate(getHandles())) {
     Value handle = en.value();
-    if (handle.getType().isa<TransformHandleTypeInterface>()) {
-      ArrayRef<Operation *> current = state.getPayloadOps(handle);
+    if (isa<TransformHandleTypeInterface>(handle.getType())) {
+      SmallVector<Operation *> current =
+          llvm::to_vector(state.getPayloadOps(handle));
       SmallVector<Operation *> payload;
       payload.reserve(numRepetitions * current.size());
       for (unsigned i = 0; i < numRepetitions; ++i)
@@ -2028,8 +2027,7 @@ transform::PrintOp::apply(transform::TransformResults &results,
   }
 
   llvm::outs() << "]]]\n";
-  ArrayRef<Operation *> targets = state.getPayloadOps(getTarget());
-  for (Operation *target : targets)
+  for (Operation *target : state.getPayloadOps(getTarget()))
     llvm::outs() << *target << "\n";
 
   return DiagnosedSilenceableFailure::success();
