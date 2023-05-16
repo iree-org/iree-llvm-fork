@@ -2394,6 +2394,15 @@ def Vector_MaskOp : Vector_Op<"mask", [
 
   let extraClassDeclaration = [{
     Block *getMaskBlock() { return &getMaskRegion().front(); }
+
+    /// Returns true if mask op is not masking any operation.
+    bool isEmpty() {
+      Block *block = getMaskBlock();
+      if (block->getOperations().size() > 1)
+        return false;
+      return true;
+    }
+
     static void ensureTerminator(Region &region, Builder &builder, Location loc);
   }];
 

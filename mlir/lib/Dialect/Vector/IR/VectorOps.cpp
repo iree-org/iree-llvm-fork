@@ -5660,10 +5660,10 @@ class ElideEmptyMaskOp : public OpRewritePattern<MaskOp> {
     if (maskingOp.getMaskableOp())
       return failure();
 
-    Block *block = maskOp.getMaskBlock();
-    if (block->getOperations().size() > 1)
+    if (!maskOp.isEmpty())
       return failure();
 
+    Block *block = maskOp.getMaskBlock();
     auto terminator = cast<vector::YieldOp>(block->front());
     if (terminator.getNumOperands() == 0)
       rewriter.eraseOp(maskOp);
@@ -5674,9 +5674,27 @@ class ElideEmptyMaskOp : public OpRewritePattern<MaskOp> {
   }
 };
 
+class FoldAllTrueMaskOp : public OpRewritePattern<MaskOp> {
+  using OpRewritePattern::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(MaskOp maskOp,
+                                PatternRewriter &rewriter) const override {
+    MaskFormat maskFormat = getMaskFormat(maskOp.getMask());
+    if (maskFormat != MaskFormat::AllTrue)
+      return failure();
+
+    if (maskOp.isEmpty())
+      return failure();
+
+    Operation *maskableOpClone = rewriter.clone(*maskOp.getMaskableOp());
+    rewriter.replaceOp(maskOp, maskableOpClone->getResult(0));
+    return success();
+  }
+};
+
 void MaskOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                          MLIRContext *context) {
-  results.add<ElideEmptyMaskOp>(context);
+  results.add<ElideEmptyMaskOp, FoldAllTrueMaskOp>(context);
 }
 
 // MaskingOpInterface definitions.
