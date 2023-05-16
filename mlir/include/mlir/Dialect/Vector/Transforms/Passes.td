@@ -21,4 +21,11 @@ def LowerVectorMaskPass : Pass<"lower-vector-mask", "func::FuncOp"> {
   let constructor = "mlir::vector::createLowerVectorMaskPass()";
 }
 
+def FoldVectorTransferTensorSlicePass :
+  Pass<"fold-vector-transfer-tensor-slice", "func::FuncOp"> {
+  let summary =
+    "Fold vector transfer read/write ops with tensor extract/insert slice ops";
+  let constructor = "mlir::vector::createFoldVectorTransferTensorSlicePass()";
+}
+
 #endif // MLIR_DIALECT_VECTOR_TRANSFORMS_PASSES

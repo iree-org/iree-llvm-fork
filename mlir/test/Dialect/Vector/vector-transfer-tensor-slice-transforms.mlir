@@ -1,4 +1,4 @@
-// RUN: mlir-opt -split-input-file -test-vector-transfer-tensor-slice-patterns %s | FileCheck %s
+// RUN: mlir-opt -split-input-file -fold-vector-transfer-tensor-slice %s | FileCheck %s
 
 // CHECK-LABEL: func @transfer_read_of_extract_slice(
 //  CHECK-SAME:     %[[t:.*]]: tensor<?x?xf32>, %[[s1:.*]]: index, %[[s2:.*]]: index

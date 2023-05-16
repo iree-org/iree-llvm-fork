@@ -7,11 +7,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
+#include "mlir/Dialect/Vector/Transforms/Passes.h"
 #include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+namespace mlir {
+namespace vector {
+#define GEN_PASS_DEF_FOLDVECTORTRANSFERTENSORSLICEPASS
+#include "mlir/Dialect/Vector/Transforms/Passes.h.inc"
+} // namespace vector
+} // namespace mlir
+  //
 using namespace mlir;
 
 /// Returns true if all rank reduced in the given `extractOp` happen in leading
@@ -30,6 +40,7 @@ static bool areAllRankReducedLeadingDim(tensor::ExtractSliceOp extractOp,
 }
 
 namespace {
+
 /// Fold transfer_reads of a tensor.extract_slice op. E.g.:
 ///
 /// ```
@@ -225,6 +236,27 @@ private:
   std::function<bool(Operation *)> controlFn;
 };
 
+struct FoldVectorTransferTensorSlicePass
+    : public vector::impl::FoldVectorTransferTensorSlicePassBase<
+          FoldVectorTransferTensorSlicePass> {
+  using Base::Base;
+
+  void runOnOperation() override {
+    Operation *op = getOperation();
+    MLIRContext *context = op->getContext();
+
+    RewritePatternSet loweringPatterns(context);
+    vector::populateVectorTransferTensorSliceTransforms(loweringPatterns);
+
+    if (failed(applyPatternsAndFoldGreedily(op, std::move(loweringPatterns))))
+      return signalPassFailure();
+  }
+
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<vector::VectorDialect>();
+  }
+};
+
 } // namespace
 
 void vector::populateVectorTransferTensorSliceTransforms(
@@ -234,4 +266,8 @@ void vector::populateVectorTransferTensorSliceTransforms(
   patterns
       .add<FoldExtractSliceIntoTransferRead, FoldInsertSliceIntoTransferWrite>(
           patterns.getContext(), controlFn, benefit);
+}
+
+std::unique_ptr<Pass> vector::createFoldVectorTransferTensorSlicePass() {
+  return std::make_unique<FoldVectorTransferTensorSlicePass>();
 }
