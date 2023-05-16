@@ -581,8 +581,8 @@ class RewriteScalarExtractElementOfTransferRead
       return failure();
     // xfer result must have a single use. Otherwise, it may be better to
     // perform a vector load.
-    if (!extractOp.getVector().hasOneUse())
-      return failure();
+    //if (!extractOp.getVector().hasOneUse())
+    //  return failure();
     // Mask not supported.
     if (xferOp.getMask())
       return failure();
@@ -644,8 +644,8 @@ class RewriteScalarExtractOfTransferRead
       return failure();
     // xfer result must have a single use. Otherwise, it may be better to
     // perform a vector load.
-    if (!extractOp.getVector().hasOneUse())
-      return failure();
+    //if (!extractOp.getVector().hasOneUse())
+    //  return failure();
     // Mask not supported.
     if (xferOp.getMask())
       return failure();
