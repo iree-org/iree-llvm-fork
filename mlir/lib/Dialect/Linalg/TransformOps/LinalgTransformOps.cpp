@@ -752,8 +752,8 @@ LogicalResult transform::InterchangeOp::verify() {
 DiagnosedSilenceableFailure transform::LowerPackOp::applyToOne(
     tensor::PackOp target, transform::ApplyToEachResultList &transformResults,
     transform::TransformState &state) {
-  TrackingListener listener(state, *this);
-  IRRewriter rewriter(getContext(), &listener);
+  //TrackingListener listener(state, *this);
+  IRRewriter rewriter(getContext()/*, &listener*/);
   rewriter.setInsertionPoint(target);
   FailureOr<LowerPackResult> res = lowerPack(rewriter, target);
   if (failed(res)) {

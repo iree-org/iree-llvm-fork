@@ -72,6 +72,10 @@ protected:
   /// Return the single op that defines all given values (if any).
   static Operation *getCommonDefiningOp(ValueRange values);
 
+  TransformOpInterface getTransformOp() const {
+    return transformOp;
+  }
+
 private:
   void notifyOperationInserted(Operation *op) override;
 
