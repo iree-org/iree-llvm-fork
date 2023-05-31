@@ -265,6 +265,8 @@ static FailureOr<NVVM::MMATypes> getNvvmMmaType(Type t) {
     return NVVM::MMATypes::s4;
   if (elType.isF16())
     return NVVM::MMATypes::f16;
+  if (elType.isBF16())
+    return NVVM::MMATypes::bf16;
   if (elType.isF64())
     return NVVM::MMATypes::f64;
   if (elType.isF32())
@@ -392,7 +394,7 @@ static void emitCpAsyncOpZfillAsm(Location loc, Value dstPtr, Value srcPtr,
   int64_t dstByteVal = dstByteAttr.getValue().getSExtValue();
 
   assert((dstByteVal == 4 || dstByteVal == 8 || dstByteVal == 16) &&
-          "cp.async byte copy size must be 4, 8 or 16");
+         "cp.async byte copy size must be 4, 8 or 16");
   // Cache global (.cg) for 16 dst bytes, Cache all (.ca) for sizes other than
   // 16 dst bytes.
   const char *asmStr = (dstByteVal == 16) ? cpAsyncCgStr : cpAsyncCaStr;
