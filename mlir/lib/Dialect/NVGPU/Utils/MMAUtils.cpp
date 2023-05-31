@@ -102,10 +102,13 @@ nvgpu::getMmaSyncRegisterType(const WarpMatrixInfo &type) {
   const bool isAccum = isAccumulatorOrResult(type.operandRole);
 
   Type elType = type.vectorType.getElementType();
-  if (elType.isF16()) {
-    return FragmentElementInfo{
-        LLVM::getFixedVectorType(Float16Type::get(ctx), 2), 2, 32,
-        inferNumRegistersPerMatrixFragment(type)};
+  if (elType.isF16() || elType.isBF16()) {
+    auto vectorType = elType.isF16()
+                          ? LLVM::getFixedVectorType(Float16Type::get(ctx), 2)
+                          : LLVM::getFixedVectorType(BFloat16Type::get(ctx), 2);
+
+    return FragmentElementInfo{vectorType, 2, 32,
+                               inferNumRegistersPerMatrixFragment(type)};
   }
 
   // f64 operand
