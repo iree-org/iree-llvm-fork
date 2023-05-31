@@ -341,8 +341,10 @@ ParseResult MmaOp::parse(OpAsmParser &parser, OperationState &result) {
 LogicalResult MmaOp::verify() {
   MLIRContext *context = getContext();
   auto f16Ty = Float16Type::get(context);
+  auto bf16Ty = BFloat16Type::get(context);
   auto i32Ty = IntegerType::get(context, 32);
   auto f16x2Ty = LLVM::getFixedVectorType(f16Ty, 2);
+  auto bf16x2Ty = LLVM::getFixedVectorType(bf16Ty, 2);
   auto f32Ty = Float32Type::get(context);
   auto f16x2x4StructTy = LLVM::LLVMStructType::getLiteral(
       context, {f16x2Ty, f16x2Ty, f16x2Ty, f16x2Ty});
@@ -384,10 +386,14 @@ LogicalResult MmaOp::verify() {
           context, {f32Ty, f32Ty, f32Ty, f32Ty}));
       break;
     case MMATypes::f16:
-    case MMATypes::bf16:
       kFactor = 8;
       multiplicandFragType = f16x2Ty;
       expectedResult.push_back(f16x2x2StructTy);
+      expectedResult.push_back(f32x4StructTy);
+      break;
+    case MMATypes::bf16:
+      kFactor = 8;
+      multiplicandFragType = bf16x2Ty;
       expectedResult.push_back(f32x4StructTy);
       break;
     case MMATypes::s4:
@@ -544,8 +550,15 @@ std::pair<mlir::Type, unsigned> NVVM::inferMMAType(NVVM::MMATypes type,
   Type elementType;
   OpBuilder builder(context);
   Type f16x2 = VectorType::get(2, builder.getF16Type());
+  Type bf16x2 = VectorType::get(2, builder.getBF16Type());
   if (type == NVVM::MMATypes::f16) {
     elementType = f16x2;
+    if (frag == NVVM::MMAFrag::a || frag == NVVM::MMAFrag::b)
+      numberElements = 8;
+    else
+      numberElements = 4;
+  } else if (type == NVVM::MMATypes::bf16) {
+    elementType = bf16x2;
     if (frag == NVVM::MMAFrag::a || frag == NVVM::MMAFrag::b)
       numberElements = 8;
     else
