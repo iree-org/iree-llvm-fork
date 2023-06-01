@@ -72,6 +72,7 @@ private:
   bool trySurfaceIntrinsic(SDNode *N);
   bool tryBFE(SDNode *N);
   bool tryConstantFP16(SDNode *N);
+  bool tryConstantBF16(SDNode *N);
   bool SelectSETP_F16X2(SDNode *N);
   bool tryEXTRACT_VECTOR_ELEMENT(SDNode *N);
 

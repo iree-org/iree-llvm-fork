@@ -272,6 +272,10 @@ bool NVPTXAsmPrinter::lowerOperand(const MachineOperand &MO,
       MCOp = MCOperand::createExpr(
         NVPTXFloatMCExpr::createConstantFPHalf(Val, OutContext));
       break;
+    case Type::BFloatTyID:
+      MCOp = MCOperand::createExpr(
+          NVPTXFloatMCExpr::createConstantBFPHalf(Val, OutContext));
+      break;
     case Type::FloatTyID:
       MCOp = MCOperand::createExpr(
         NVPTXFloatMCExpr::createConstantFPSingle(Val, OutContext));
@@ -1359,8 +1363,10 @@ NVPTXAsmPrinter::getPTXFundamentalTypeStr(Type *Ty, bool useB4PTR) const {
     }
     break;
   }
+  case Type::BFloatTyID:
   case Type::HalfTyID:
-    // fp16 is stored as .b16 for compatibility with pre-sm_53 PTX assembly.
+    // fp16 and bf16 are stored as .b16 for compatibility with pre-sm_53
+    // PTX assembly.
     return "b16";
   case Type::FloatTyID:
     return "f32";
@@ -1585,7 +1591,7 @@ void NVPTXAsmPrinter::emitFunctionParamList(const Function *F, raw_ostream &O) {
       } else if (PTy) {
         assert(PTySizeInBits && "Invalid pointer size");
         sz = PTySizeInBits;
-      } else if (Ty->isHalfTy())
+      } else if (Ty->isHalfTy() || Ty->isBFloatTy())
         // PTX ABI requires all scalar parameters to be at least 32
         // bits in size.  fp16 normally uses .b16 as its storage type
         // in PTX, so its size must be adjusted here, too.

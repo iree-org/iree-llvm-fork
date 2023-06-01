@@ -61,9 +61,11 @@ void NVPTXInstPrinter::printRegName(raw_ostream &OS, MCRegister Reg) const {
     OS << "%fd";
     break;
   case 7:
+  case 9:
     OS << "%h";
     break;
   case 8:
+  case 10:
     OS << "%hh";
     break;
   }
