@@ -122,6 +122,10 @@ void populateVectorMaskMaterializationPatterns(RewritePatternSet &patterns,
                                                bool force32BitVectorIndices,
                                                PatternBenefit benefit = 1);
 
+/// Collect a set of patterns that fold arithmetic extension on floating point
+/// into vector contract for the backends with native support.
+void populateFoldArithExtensionPatterns(RewritePatternSet &patterns);
+
 /// Returns the integer type required for subscripts in the vector dialect.
 IntegerType getVectorSubscriptType(Builder &builder);
 
