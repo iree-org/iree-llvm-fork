@@ -537,6 +537,16 @@ bool NVPTXDAGToDAGISel::tryConstantFP16(SDNode *N) {
   return true;
 }
 
+bool NVPTXDAGToDAGISel::tryConstantBF16(SDNode *N) {
+  if (N->getValueType(0) != MVT::bf16)
+    return false;
+  SDValue Val = CurDAG->getTargetConstantFP(
+      cast<ConstantFPSDNode>(N)->getValueAPF(), SDLoc(N), MVT::bf16);
+  SDNode *LoadConstBF16 =
+      CurDAG->getMachineNode(NVPTX::LOAD_CONST_BF16, SDLoc(N), MVT::bf16, Val);
+  ReplaceNode(N, LoadConstBF16);
+  return true;
+}
 // Map ISD:CONDCODE value to appropriate CmpMode expected by
 // NVPTXInstPrinter::printCmpMode()
 static unsigned getPTXCmpMode(const CondCodeSDNode &CondCode, bool FTZ) {
@@ -1287,6 +1297,10 @@ bool NVPTXDAGToDAGISel::tryLDGLDU(SDNode *N) {
     if (EltVT == MVT::f16 && N->getValueType(0) == MVT::v2f16) {
       assert(NumElts % 2 == 0 && "Vector must have even number of elements");
       EltVT = MVT::v2f16;
+      NumElts /= 2;
+    } else if (EltVT == MVT::bf16 && N->getValueType(0) == MVT::v2bf16) {
+      assert(NumElts % 2 == 0 && "Vector must have even number of elements");
+      EltVT = MVT::v2bf16;
       NumElts /= 2;
     }
   }

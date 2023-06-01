@@ -26,7 +26,10 @@ static cl::opt<bool>
     NoF16Math("nvptx-no-f16-math", cl::Hidden,
               cl::desc("NVPTX Specific: Disable generation of f16 math ops."),
               cl::init(false));
-
+static cl::opt<bool>
+    NoBF16Math("nvptx-no-bf16-math", cl::Hidden,
+               cl::desc("NVPTX Specific: Disable generation of bf16 math ops."),
+               cl::init(false));
 // Pin the vtable to this file.
 void NVPTXSubtarget::anchor() {}
 
@@ -64,4 +67,8 @@ bool NVPTXSubtarget::hasImageHandles() const {
 
 bool NVPTXSubtarget::allowFP16Math() const {
   return hasFP16Math() && NoF16Math == false;
+}
+
+bool NVPTXSubtarget::allowBF16Math() const {
+  return hasBF16Math() && NoBF16Math == false;
 }

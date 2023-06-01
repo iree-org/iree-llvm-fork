@@ -998,6 +998,18 @@ multiclass FMA_INST {
     FMA_TUPLE<"_rn_ftz_relu_f16", int_nvvm_fma_rn_ftz_relu_f16, Float16Regs,
       [hasPTX<70>, hasSM<80>]>,
 
+    FMA_TUPLE<"_rn_bf16", int_nvvm_fma_rn_bf16, BFloat16Regs, [hasPTX70, hasSM80]>,
+    FMA_TUPLE<"_rn_ftz_bf16", int_nvvm_fma_rn_ftz_bf16, BFloat16Regs,
+      [hasPTX70, hasSM80]>,
+    FMA_TUPLE<"_rn_sat_bf16", int_nvvm_fma_rn_sat_bf16, BFloat16Regs,
+      [hasPTX70, hasSM80]>,
+    FMA_TUPLE<"_rn_ftz_sat_bf16", int_nvvm_fma_rn_ftz_sat_bf16, BFloat16Regs,
+      [hasPTX70, hasSM80]>,
+    FMA_TUPLE<"_rn_relu_bf16", int_nvvm_fma_rn_relu_bf16, BFloat16Regs,
+      [hasPTX70, hasSM80]>,
+    FMA_TUPLE<"_rn_ftz_relu_bf16", int_nvvm_fma_rn_ftz_relu_bf16, BFloat16Regs,
+      [hasPTX70, hasSM80]>,
+
     FMA_TUPLE<"_rn_f16x2", int_nvvm_fma_rn_f16x2, Float16x2Regs,
       [hasPTX<42>, hasSM<53>]>,
     FMA_TUPLE<"_rn_ftz_f16x2", int_nvvm_fma_rn_ftz_f16x2, Float16x2Regs,
@@ -1011,14 +1023,10 @@ multiclass FMA_INST {
     FMA_TUPLE<"_rn_ftz_relu_f16x2", int_nvvm_fma_rn_ftz_relu_f16x2,
       Float16x2Regs, [hasPTX<70>, hasSM<80>]>,
 
-    FMA_TUPLE<"_rn_bf16", int_nvvm_fma_rn_bf16, Int16Regs, [hasPTX<70>, hasSM<80>]>,
-    FMA_TUPLE<"_rn_relu_bf16", int_nvvm_fma_rn_relu_bf16, Int16Regs,
-      [hasPTX<70>, hasSM<80>]>,
-
-    FMA_TUPLE<"_rn_bf16x2", int_nvvm_fma_rn_bf16x2, Int32Regs,
-      [hasPTX<70>, hasSM<80>]>,
-    FMA_TUPLE<"_rn_relu_bf16x2", int_nvvm_fma_rn_relu_bf16x2, Int32Regs,
-      [hasPTX<70>, hasSM<80>]>
+    FMA_TUPLE<"_rn_bf16x2", int_nvvm_fma_rn_bf16x2, BFloat16x2Regs,
+      [hasPTX70, hasSM80]>,
+    FMA_TUPLE<"_rn_relu_bf16x2", int_nvvm_fma_rn_relu_bf16x2, BFloat16x2Regs,
+      [hasPTX70, hasSM80]>
   ] in {
     def P.Variant :
       F_MATH_3<!strconcat("fma",
@@ -1267,24 +1275,6 @@ def : Pat<(int_nvvm_ff2bf16x2_rz Float32Regs:$a, Float32Regs:$b),
           (CVT_bf16x2_f32 Float32Regs:$a, Float32Regs:$b, CvtRZ)>;
 def : Pat<(int_nvvm_ff2bf16x2_rz_relu Float32Regs:$a, Float32Regs:$b),
           (CVT_bf16x2_f32 Float32Regs:$a, Float32Regs:$b, CvtRZ_RELU)>;
-
-def : Pat<(int_nvvm_ff2f16x2_rn Float32Regs:$a, Float32Regs:$b),
-          (CVT_f16x2_f32 Float32Regs:$a, Float32Regs:$b, CvtRN)>;
-def : Pat<(int_nvvm_ff2f16x2_rn_relu Float32Regs:$a, Float32Regs:$b),
-          (CVT_f16x2_f32 Float32Regs:$a, Float32Regs:$b, CvtRN_RELU)>;
-def : Pat<(int_nvvm_ff2f16x2_rz Float32Regs:$a, Float32Regs:$b),
-          (CVT_f16x2_f32 Float32Regs:$a, Float32Regs:$b, CvtRZ)>;
-def : Pat<(int_nvvm_ff2f16x2_rz_relu Float32Regs:$a, Float32Regs:$b),
-          (CVT_f16x2_f32 Float32Regs:$a, Float32Regs:$b, CvtRZ_RELU)>;
-
-def : Pat<(int_nvvm_f2bf16_rn Float32Regs:$a),
-          (CVT_bf16_f32 Float32Regs:$a, CvtRN)>;
-def : Pat<(int_nvvm_f2bf16_rn_relu Float32Regs:$a),
-          (CVT_bf16_f32 Float32Regs:$a, CvtRN_RELU)>;
-def : Pat<(int_nvvm_f2bf16_rz Float32Regs:$a),
-          (CVT_bf16_f32 Float32Regs:$a, CvtRZ)>;
-def : Pat<(int_nvvm_f2bf16_rz_relu Float32Regs:$a),
-          (CVT_bf16_f32 Float32Regs:$a, CvtRZ_RELU)>;
 
 def CVT_tf32_f32 :
    NVPTXInst<(outs Int32Regs:$dest), (ins Float32Regs:$a),
@@ -2161,6 +2151,8 @@ defm INT_PTX_LDU_GLOBAL_i32 : LDU_G<"u32 \t$result, [$src];", Int32Regs>;
 defm INT_PTX_LDU_GLOBAL_i64 : LDU_G<"u64 \t$result, [$src];", Int64Regs>;
 defm INT_PTX_LDU_GLOBAL_f16 : LDU_G<"b16 \t$result, [$src];", Float16Regs>;
 defm INT_PTX_LDU_GLOBAL_f16x2 : LDU_G<"b32 \t$result, [$src];", Float16x2Regs>;
+defm INT_PTX_LDU_GLOBAL_bf16 : LDU_G<"b16 \t$result, [$src];", BFloat16Regs>;
+defm INT_PTX_LDU_GLOBAL_bf16x2 : LDU_G<"b32 \t$result, [$src];", BFloat16x2Regs>;
 defm INT_PTX_LDU_GLOBAL_f32 : LDU_G<"f32 \t$result, [$src];", Float32Regs>;
 defm INT_PTX_LDU_GLOBAL_f64 : LDU_G<"f64 \t$result, [$src];", Float64Regs>;
 defm INT_PTX_LDU_GLOBAL_p32 : LDU_G<"u32 \t$result, [$src];", Int32Regs>;
@@ -2215,6 +2207,10 @@ defm INT_PTX_LDU_G_v2f16_ELE
   : VLDU_G_ELE_V2<"v2.b16 \t{{$dst1, $dst2}}, [$src];", Float16Regs>;
 defm INT_PTX_LDU_G_v2f16x2_ELE
   : VLDU_G_ELE_V2<"v2.b32 \t{{$dst1, $dst2}}, [$src];", Float16x2Regs>;
+defm INT_PTX_LDU_G_v2bf16_ELE
+  : VLDU_G_ELE_V2<"v2.b16 \t{{$dst1, $dst2}}, [$src];", BFloat16Regs>;
+defm INT_PTX_LDU_G_v2bf16x2_ELE
+  : VLDU_G_ELE_V2<"v2.b32 \t{{$dst1, $dst2}}, [$src];", BFloat16x2Regs>;
 defm INT_PTX_LDU_G_v2f32_ELE
   : VLDU_G_ELE_V2<"v2.f32 \t{{$dst1, $dst2}}, [$src];", Float32Regs>;
 defm INT_PTX_LDU_G_v2i64_ELE
@@ -2278,6 +2274,10 @@ defm INT_PTX_LDG_GLOBAL_f16
   : LDG_G<"b16 \t$result, [$src];", Float16Regs>;
 defm INT_PTX_LDG_GLOBAL_f16x2
   : LDG_G<"b32 \t$result, [$src];", Float16x2Regs>;
+defm INT_PTX_LDG_GLOBAL_bf16
+  : LDG_G<"b16 \t$result, [$src];", BFloat16Regs>;
+defm INT_PTX_LDG_GLOBAL_bf16x2
+  : LDG_G<"b32 \t$result, [$src];", BFloat16x2Regs>;
 defm INT_PTX_LDG_GLOBAL_f32
   : LDG_G<"f32 \t$result, [$src];", Float32Regs>;
 defm INT_PTX_LDG_GLOBAL_f64

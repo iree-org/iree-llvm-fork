@@ -595,16 +595,18 @@ let TargetPrefix = "nvvm" in {
           [IntrNoMem, IntrSpeculatable, Commutative]>;
     }
 
-    foreach variant = ["_bf16", "_nan_bf16", "_xorsign_abs_bf16",
-      "_nan_xorsign_abs_bf16"] in {
+    foreach variant = ["_bf16", "_ftz_bf16", "_nan_bf16", "_ftz_nan_bf16",
+      "_xorsign_abs_bf16", "_ftz_xorsign_abs_bf16", "_nan_xorsign_abs_bf16",
+      "_ftz_nan_xorsign_abs_bf16"] in {
       def int_nvvm_f # operation # variant :
         ClangBuiltin<!strconcat("__nvvm_f", operation, variant)>,
         DefaultAttrsIntrinsic<[llvm_i16_ty], [llvm_i16_ty, llvm_i16_ty],
           [IntrNoMem, IntrSpeculatable, Commutative]>;
     }
 
-    foreach variant = ["_bf16x2", "_nan_bf16x2", "_xorsign_abs_bf16x2",
-      "_nan_xorsign_abs_bf16x2"] in {
+    foreach variant = ["_bf16x2", "_ftz_bf16x2", "_nan_bf16x2",
+      "_ftz_nan_bf16x2", "_xorsign_abs_bf16x2", "_ftz_xorsign_abs_bf16x2",
+      "_nan_xorsign_abs_bf16x2", "_ftz_nan_xorsign_abs_bf16x2"]  in {
       def int_nvvm_f # operation # variant :
         ClangBuiltin<!strconcat("__nvvm_f", operation, variant)>,
         DefaultAttrsIntrinsic<[llvm_i32_ty], [llvm_i32_ty, llvm_i32_ty],
@@ -870,17 +872,19 @@ let TargetPrefix = "nvvm" in {
       [IntrNoMem, IntrSpeculatable]>;
   }
 
-  foreach variant = ["_rn_bf16", "_rn_relu_bf16"] in {
+  foreach variant = ["_rn_bf16", "_rn_ftz_bf16", "_rn_sat_bf16",
+    "_rn_ftz_sat_bf16", "_rn_relu_bf16", "_rn_ftz_relu_bf16"] in {
     def int_nvvm_fma # variant : ClangBuiltin<!strconcat("__nvvm_fma", variant)>,
-      DefaultAttrsIntrinsic<[llvm_i16_ty],
-        [llvm_i16_ty, llvm_i16_ty, llvm_i16_ty],
+      DefaultAttrsIntrinsic<[llvm_bfloat_ty],
+        [llvm_bfloat_ty, llvm_bfloat_ty, llvm_bfloat_ty],
         [IntrNoMem, IntrSpeculatable]>;
   }
 
-  foreach variant = ["_rn_bf16x2", "_rn_relu_bf16x2"] in {
+  foreach variant = ["_rn_bf16x2", "_rn_ftz_bf16x2", "_rn_sat_bf16x2",
+    "_rn_ftz_sat_bf16x2", "_rn_relu_bf16x2", "_rn_ftz_relu_bf16x2"] in {
     def int_nvvm_fma # variant : ClangBuiltin<!strconcat("__nvvm_fma", variant)>,
-      DefaultAttrsIntrinsic<[llvm_i32_ty],
-        [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+      DefaultAttrsIntrinsic<[llvm_v2bf16_ty],
+        [llvm_v2bf16_ty, llvm_v2bf16_ty, llvm_v2bf16_ty],
         [IntrNoMem, IntrSpeculatable]>;
   }
 
@@ -1231,6 +1235,11 @@ let TargetPrefix = "nvvm" in {
       DefaultAttrsIntrinsic<[llvm_i16_ty], [llvm_float_ty], [IntrNoMem, IntrSpeculatable]>;
   def int_nvvm_f2h_rn : ClangBuiltin<"__nvvm_f2h_rn">,
       DefaultAttrsIntrinsic<[llvm_i16_ty], [llvm_float_ty], [IntrNoMem, IntrSpeculatable]>;
+
+  def int_nvvm_bf2h_rn_ftz : ClangBuiltin<"__nvvm_bf2h_rn_ftz">,
+      DefaultAttrsIntrinsic<[llvm_i16_ty], [llvm_bfloat_ty], [IntrNoMem, IntrSpeculatable]>;
+  def int_nvvm_bf2h_rn : ClangBuiltin<"__nvvm_bf2h_rn">,
+      DefaultAttrsIntrinsic<[llvm_i16_ty], [llvm_bfloat_ty], [IntrNoMem, IntrSpeculatable]>;
 
   def int_nvvm_ff2bf16x2_rn : ClangBuiltin<"__nvvm_ff2bf16x2_rn">,
        Intrinsic<[llvm_i32_ty], [llvm_float_ty, llvm_float_ty], [IntrNoMem, IntrNoCallback]>;
