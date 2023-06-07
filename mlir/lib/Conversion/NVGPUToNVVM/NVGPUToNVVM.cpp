@@ -274,6 +274,45 @@ static FailureOr<NVVM::MMATypes> getNvvmMmaType(Type t) {
   return failure();
 }
 
+/// Builds an inline assembly operation corresponding to the specified MMA
+/// sparse sync operation.
+static FailureOr<LLVM::InlineAsmOp>
+emitMmaSyncOpAsm(Location loc, NVVM::MMATypes ptxTypeA, NVVM::MMATypes ptxTypeB,
+                 NVVM::MMATypes ptxTypeC, NVVM::MMATypes ptxTypeD,
+                 ArrayRef<Value> unpackedAData, ArrayRef<Value> unpackedB,
+                 ArrayRef<Value> unpackedC, const std::array<int64_t, 3> &shape,
+                 Type intrinsicResultType,
+                 ConversionPatternRewriter &rewriter) {
+
+  auto asmDialectAttr = LLVM::AsmDialectAttr::get(rewriter.getContext(),
+                                                  LLVM::AsmDialect::AD_ATT);
+
+  const char *asmStr =
+      "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 {$0, $1, $2, $3}, "
+      "{$4, $5, $6, $7}, {$8, $9}, {$10, $11, $12, $13};\n ";
+
+  const char *asmConstraintStr = "=f,=f,=f,=f,r,r,r,r,r,r,f,f,f,f";
+
+  const unsigned matASize = unpackedAData.size();
+  const unsigned matBSize = unpackedB.size();
+  const unsigned matCSize = unpackedC.size();
+
+  SmallVector<Value> asmVals;
+  asmVals.reserve(matASize + matBSize + matCSize);
+  for (ArrayRef<Value> args : {unpackedAData, unpackedB, unpackedC})
+    llvm::append_range(asmVals, args);
+
+  return rewriter.create<LLVM::InlineAsmOp>(loc,
+                                            /*resultTypes=*/intrinsicResultType,
+                                            /*operands=*/asmVals,
+                                            /*asm_string=*/asmStr,
+                                            /*constraints=*/asmConstraintStr,
+                                            /*has_side_effects=*/true,
+                                            /*is_align_stack=*/false,
+                                            /*asm_dialect=*/asmDialectAttr,
+                                            /*operand_attrs=*/ArrayAttr());
+}
+
 struct MmaSyncOptoNVVM : public ConvertOpToLLVMPattern<nvgpu::MmaSyncOp> {
   using ConvertOpToLLVMPattern<nvgpu::MmaSyncOp>::ConvertOpToLLVMPattern;
 
@@ -322,19 +361,31 @@ struct MmaSyncOptoNVVM : public ConvertOpToLLVMPattern<nvgpu::MmaSyncOp> {
     Type desiredRetTy = typeConverter->convertType(op->getResultTypes()[0]);
     Type intrinsicResTy = inferIntrinsicResultType(
         typeConverter->convertType(op->getResultTypes()[0]));
-    Value intrinsicResult = rewriter.create<NVVM::MmaOp>(
-        op.getLoc(), intrinsicResTy, matA, matB, matC,
-        /*shape=*/gemmShape,
-        /*b1Op=*/std::nullopt,
-        /*intOverflow=*/overflow,
-        /*multiplicandPtxTypes=*/
-        std::array<NVVM::MMATypes, 2>{*ptxTypeA, *ptxTypeB},
-        /*multiplicandLayouts=*/
-        std::array<NVVM::MMALayout, 2>{NVVM::MMALayout::row,
-                                       NVVM::MMALayout::col});
-    rewriter.replaceOp(op, convertIntrinsicResult(op.getLoc(), intrinsicResTy,
-                                                  desiredRetTy, intrinsicResult,
-                                                  rewriter));
+
+    if (aType.getElementType().isBF16()) {
+      FailureOr<LLVM::InlineAsmOp> intrinsicResult = emitMmaSyncOpAsm(
+          loc, *ptxTypeA, *ptxTypeB, *ptxTypeC, *ptxTypeC, matA, matB, matC,
+          op.getMmaShapeAsArray(), intrinsicResTy, rewriter);
+
+      rewriter.replaceOp(op, convertIntrinsicResult(
+                                 op.getLoc(), intrinsicResTy, desiredRetTy,
+                                 (*intrinsicResult)->getResult(0), rewriter));
+
+    } else {
+      Value intrinsicResult = rewriter.create<NVVM::MmaOp>(
+          op.getLoc(), intrinsicResTy, matA, matB, matC,
+          /*shape=*/gemmShape,
+          /*b1Op=*/std::nullopt,
+          /*intOverflow=*/overflow,
+          /*multiplicandPtxTypes=*/
+          std::array<NVVM::MMATypes, 2>{*ptxTypeA, *ptxTypeB},
+          /*multiplicandLayouts=*/
+          std::array<NVVM::MMALayout, 2>{NVVM::MMALayout::row,
+                                         NVVM::MMALayout::col});
+      rewriter.replaceOp(op, convertIntrinsicResult(op.getLoc(), intrinsicResTy,
+                                                    desiredRetTy,
+                                                    intrinsicResult, rewriter));
+    }
     return success();
   }
 };
