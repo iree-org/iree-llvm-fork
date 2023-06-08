@@ -597,6 +597,31 @@ class FlattenContiguousRowMajorTransferWritePattern
   }
 };
 
+static bool isMaskedScalarLoad(vector::TransferReadOp xferOp) {
+  Value mask = xferOp.getMask();
+  if (!mask)
+    return false;
+
+  auto andMask = mask.getDefiningOp<arith::AndIOp>();
+  if (!andMask)
+    return false;
+  Value andOp0 = andMask.getOperand(0);
+  Value andOp1 = andMask.getOperand(1);
+  auto createMaskOp = andOp0.getDefiningOp<vector::CreateMaskOp>();
+  auto constantMaskOp = andOp1.getDefiningOp<vector::ConstantMaskOp>();
+  if (!createMaskOp && !constantMaskOp)
+    return false;
+
+  auto maskDimsAttrs = constantMaskOp.getMaskDimSizes().getValue();
+  SmallVector<int64_t> maskDims;
+  llvm::transform(
+      maskDimsAttrs, std::back_inserter(maskDims),
+      [](Attribute dimAttr) { return cast<IntegerAttr>(dimAttr).getInt(); });
+
+  return std::all_of(maskDims.begin(), maskDims.end(),
+                     [](int64_t dimSize) { return dimSize == 1; });
+}
+
 /// Base class for `vector.extract/vector.extract_element(vector.transfer_read)`
 /// to `memref.load` patterns. The `match` method is shared for both
 /// `vector.extract` and `vector.extract_element`.
@@ -631,7 +656,8 @@ public:
         }))
       return failure();
     // Mask not supported.
-    if (xferOp.getMask())
+    if (xferOp.getMask() && (!isa<MemRefType>(xferOp.getSource().getType()) ||
+                             isMaskedScalarLoad(xferOp)))
       return failure();
     // Map not supported.
     if (!xferOp.getPermutationMap().isMinorIdentity())
@@ -680,12 +706,33 @@ class RewriteScalarExtractElementOfTransferRead
       }
     }
     if (isa<MemRefType>(xferOp.getSource().getType())) {
-      rewriter.replaceOpWithNewOp<memref::LoadOp>(extractOp, xferOp.getSource(),
-                                                  newIndices);
-    } else {
-      rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
-          extractOp, xferOp.getSource(), newIndices);
+      if (!xferOp.getMask()) {
+        rewriter.replaceOpWithNewOp<memref::LoadOp>(
+            extractOp, xferOp.getSource(), newIndices);
+        return;
+      }
+
+      // Masked case.
+      auto oldMask = xferOp.getMask();
+      unsigned numDims = oldMask.getType().getRank();
+      SmallVector<int64_t> maskSizes(numDims, 1);
+      auto singleElementMask = rewriter.create<vector::ConstantMaskOp>(
+          loc, oldMask.getType(), rewriter.getI64ArrayAttr(maskSizes));
+      auto newMask = rewriter.create<arith::AndIOp>(
+          loc, oldMask.getType(), oldMask, singleElementMask);
+      auto maskedRead = rewriter.create<vector::TransferReadOp>(
+          loc, xferOp.getVectorType(), xferOp.getSource(), newIndices,
+          xferOp.getPermutationMap(), xferOp.getPadding(), newMask,
+          xferOp.getInBoundsAttr());
+      SmallVector<int64_t> extractPos(numDims, 0);
+      rewriter.replaceOpWithNewOp<vector::ExtractOp>(extractOp, maskedRead,
+                                                     extractPos);
+      return;
     }
+
+    // Tensor type.
+    rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
+        extractOp, xferOp.getSource(), newIndices);
   }
 };
 
@@ -705,6 +752,7 @@ class RewriteScalarExtractOfTransferRead
   void rewrite(vector::ExtractOp extractOp,
                PatternRewriter &rewriter) const override {
     // Construct scalar load.
+    auto loc = extractOp.getLoc();
     auto xferOp = extractOp.getVector().getDefiningOp<vector::TransferReadOp>();
     SmallVector<Value> newIndices(xferOp.getIndices().begin(),
                                   xferOp.getIndices().end());
@@ -713,22 +761,43 @@ class RewriteScalarExtractOfTransferRead
       int64_t idx =
           newIndices.size() - extractOp.getPosition().size() + it.index();
       OpFoldResult ofr = affine::makeComposedFoldedAffineApply(
-          rewriter, extractOp.getLoc(),
-          rewriter.getAffineSymbolExpr(0) + offset, {newIndices[idx]});
+          rewriter, loc, rewriter.getAffineSymbolExpr(0) + offset,
+          {newIndices[idx]});
       if (ofr.is<Value>()) {
         newIndices[idx] = ofr.get<Value>();
       } else {
         newIndices[idx] = rewriter.create<arith::ConstantIndexOp>(
-            extractOp.getLoc(), *getConstantIntValue(ofr));
+            loc, *getConstantIntValue(ofr));
       }
     }
     if (isa<MemRefType>(xferOp.getSource().getType())) {
-      rewriter.replaceOpWithNewOp<memref::LoadOp>(extractOp, xferOp.getSource(),
-                                                  newIndices);
-    } else {
-      rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
-          extractOp, xferOp.getSource(), newIndices);
+      if (!xferOp.getMask()) {
+        rewriter.replaceOpWithNewOp<memref::LoadOp>(
+            extractOp, xferOp.getSource(), newIndices);
+        return;
+      }
+
+      // Masked case.
+      auto oldMask = xferOp.getMask();
+      unsigned numDims = oldMask.getType().getRank();
+      SmallVector<int64_t> maskSizes(numDims, 1);
+      auto singleElementMask = rewriter.create<vector::ConstantMaskOp>(
+          loc, oldMask.getType(), rewriter.getI64ArrayAttr(maskSizes));
+      auto newMask = rewriter.create<arith::AndIOp>(
+          loc, oldMask.getType(), oldMask, singleElementMask);
+      auto maskedRead = rewriter.create<vector::TransferReadOp>(
+          loc, xferOp.getVectorType(), xferOp.getSource(), newIndices,
+          xferOp.getPermutationMap(), xferOp.getPadding(), newMask,
+          xferOp.getInBoundsAttr());
+      SmallVector<int64_t> extractPos(numDims, 0);
+      rewriter.replaceOpWithNewOp<vector::ExtractOp>(extractOp, maskedRead,
+                                                     extractPos);
+      return;
     }
+
+    // Tensor type.
+    rewriter.replaceOpWithNewOp<tensor::ExtractOp>(
+        extractOp, xferOp.getSource(), newIndices);
   }
 };
 
