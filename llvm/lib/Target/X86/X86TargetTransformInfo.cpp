@@ -5835,7 +5835,7 @@ bool X86TTIImpl::isLegalMaskedLoad(Type *DataTy, Align Alignment) {
     return false;
 
   // The backend can't handle a single element vector.
-  if (isa<VectorType>(DataTy) &&
+  if (!ST->hasAVX512() && isa<VectorType>(DataTy) &&
       cast<FixedVectorType>(DataTy)->getNumElements() == 1)
     return false;
   Type *ScalarTy = DataTy->getScalarType();
