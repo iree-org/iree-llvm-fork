@@ -518,6 +518,30 @@ SmallVector<int64_t, 4> AffineMap::compose(ArrayRef<int64_t> values) const {
   return res;
 }
 
+bool AffineMap::isProjection() const {
+  if (getNumSymbols() > 0)
+    return false;
+
+  // Having more results than inputs means that results have duplicated dims or
+  // zeros that can't be mapped to input dims.
+  if (getNumResults() > getNumInputs())
+    return false;
+
+  std::optional<int64_t> largestSeenDim;
+  for (auto expr : getResults()) {
+    auto dimExpr = expr.dyn_cast<AffineDimExpr>();
+    if (!dimExpr)
+      return false;
+    if (largestSeenDim) {
+      if (dimExpr.getPosition() >= largestSeenDim.value())
+        return false;
+    } else {
+      largestSeenDim = dimExpr.getPosition();
+    }
+  }
+  return true;
+}
+
 bool AffineMap::isProjectedPermutation(bool allowZeroInResults) const {
   if (getNumSymbols() > 0)
     return false;
