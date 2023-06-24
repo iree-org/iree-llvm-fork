@@ -554,6 +554,20 @@ bool AffineMap::isPermutation() const {
   return isProjectedPermutation();
 }
 
+AffineMap AffineMap::getNonPermutedProjectionMap() {
+  assert(isProjectedPermutation() && "Expected projected permutation");
+
+  // Create an identity map with the same number of inputs and project the
+  // dimensions needed.
+  AffineMap projectionMap =
+      getMultiDimIdentityMap(getNumInputs(), getContext());
+  llvm::SmallBitVector projectedDims(getNumInputs(), true);
+  for (int i = 0, numResults = getNumResults(); i < numResults; ++i)
+    projectedDims[getDimPosition(i)] = false;
+
+  return projectionMap.dropResults(projectedDims);
+}
+
 AffineMap AffineMap::getSubMap(ArrayRef<unsigned> resultPos) const {
   SmallVector<AffineExpr, 4> exprs;
   exprs.reserve(resultPos.size());

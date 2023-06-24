@@ -323,6 +323,13 @@ public:
   /// Returns true if the AffineMap represents a symbol-less permutation map.
   bool isPermutation() const;
 
+  /// Given a projected permutation map, returns the projection map without the
+  /// permutation.
+  /// Example:
+  ///   map     : affine_map<(d0, d1, d2, d3) -> (d3, d1, d2)>
+  ///   result  : affine_map<(d0, d1, d2, d3) -> (d1, d2, d3)>
+  AffineMap getNonPermutedProjectionMap();
+
   /// Returns the map consisting of the `resultPos` subset.
   AffineMap getSubMap(ArrayRef<unsigned> resultPos) const;
 
