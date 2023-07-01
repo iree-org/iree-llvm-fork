@@ -3076,6 +3076,14 @@ namespace ISD {
       Ld->getAddressingMode() == ISD::UNINDEXED;
   }
 
+  /// Returns true if the specified node is a non-extending and unindexed masked
+  /// load.
+  inline bool isNormalMaskedLoad(const SDNode *N) {
+    const MaskedLoadSDNode *MaskedLd = dyn_cast<MaskedLoadSDNode>(N);
+    return MaskedLd && MaskedLd->getExtensionType() == ISD::NON_EXTLOAD &&
+           MaskedLd->getAddressingMode() == ISD::UNINDEXED;
+  }
+
   /// Returns true if the specified node is a non-extending load.
   inline bool isNON_EXTLoad(const SDNode *N) {
     return isa<LoadSDNode>(N) &&

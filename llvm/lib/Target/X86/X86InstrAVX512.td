@@ -1348,6 +1348,7 @@ multiclass avx512_fp_broadcast_ss<bits<8> opc, string OpcodeStr,
 }
 defm VBROADCASTSS  : avx512_fp_broadcast_ss<0x18, "vbroadcastss",
                                        avx512vl_f32_info>;
+
 defm VBROADCASTSD  : avx512_fp_broadcast_sd<0x19, "vbroadcastsd",
                                        avx512vl_f64_info>, VEX_W1X;
 
@@ -1507,6 +1508,11 @@ let Predicates = [HasVLX, HasBWI] in {
             (VPBROADCASTWZ128rr (COPY_TO_REGCLASS FR16X:$src, VR128X))>;
   def : Pat<(v16f16 (X86VBroadcast (f16 FR16X:$src))),
             (VPBROADCASTWZ256rr (COPY_TO_REGCLASS FR16X:$src, VR128X))>;
+}
+
+let Predicates = [HasAVX512] in {
+  def : Pat<(v16f32 (X86VBroadcastmaskedld32 addr:$src, VK16WM:$mask, VR512:$passthru)),
+            (VBROADCASTSSZrmk VR512:$passthru, VK16WM:$mask, addr:$src)>;
 }
 
 //===----------------------------------------------------------------------===//

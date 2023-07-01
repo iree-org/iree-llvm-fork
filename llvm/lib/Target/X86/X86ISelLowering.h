@@ -824,6 +824,9 @@ namespace llvm {
     // scalar broadcast from memory.
     VBROADCAST_LOAD,
 
+    // masked scalar broadcast from memory.
+    VBROADCAST_MASKEDLOAD,
+
     // subvector broadcast from memory.
     SUBV_BROADCAST_LOAD,
 

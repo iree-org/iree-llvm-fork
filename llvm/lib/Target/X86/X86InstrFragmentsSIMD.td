@@ -109,6 +109,9 @@ def X86vextractst  : SDNode<"X86ISD::VEXTRACT_STORE", SDTStore,
                      [SDNPHasChain, SDNPMayStore, SDNPMemOperand]>;
 def X86VBroadcastld  : SDNode<"X86ISD::VBROADCAST_LOAD", SDTLoad,
                       [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def X86VBroadcastmaskedld  : SDNode<"X86ISD::VBROADCAST_MASKEDLOAD", SDTMaskedLoad,
+                            [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+
 def X86SubVBroadcastld : SDNode<"X86ISD::SUBV_BROADCAST_LOAD", SDTLoad,
                          [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
 
@@ -224,7 +227,7 @@ def X86cmpmmSAE : SDNode<"X86ISD::CMPMM_SAE", X86MaskCmpMaskCC>;
 def X86cmpms    : SDNode<"X86ISD::FSETCCM",   X86CmpMaskCCScalar>;
 def X86cmpmsSAE : SDNode<"X86ISD::FSETCCM_SAE",   X86CmpMaskCCScalar>;
 
-def X86phminpos: SDNode<"X86ISD::PHMINPOS", 
+def X86phminpos: SDNode<"X86ISD::PHMINPOS",
                  SDTypeProfile<1, 1, [SDTCisVT<0, v8i16>, SDTCisVT<1, v8i16>]>>;
 
 def X86vshiftuniform : SDTypeProfile<1, 2, [SDTCisVec<0>, SDTCisSameAs<0,1>,
@@ -1026,6 +1029,14 @@ def X86SubVBroadcastld256 : PatFrag<(ops node:$src),
                                     (X86SubVBroadcastld node:$src), [{
   return cast<MemIntrinsicSDNode>(N)->getMemoryVT().getStoreSize() == 32;
 }]>;
+
+def X86VBroadcastmaskedld32 : PatFrag<(ops node:$src1, node:$src2, node:$src3),
+                                      (X86VBroadcastmaskedld node:$src1, undef,
+                                       node:$src2, node:$src3), [{
+  // return cast<MemIntrinsicSDNode>(N)->getMemoryVT().getStoreSize() == 4;
+  return true;
+}]>;
+
 
 // Scalar SSE intrinsic fragments to match several different types of loads.
 // Used by scalar SSE intrinsic instructions which have 128 bit types, but
