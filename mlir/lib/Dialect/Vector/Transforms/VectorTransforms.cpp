@@ -1072,6 +1072,67 @@ private:
   const bool force32BitVectorIndices;
 };
 
+// TODO:
+static bool allI1ConstantValuesSetTo(arith::ConstantOp constantOp, bool value) {
+  auto denseAttr = dyn_cast<DenseIntElementsAttr>(constantOp.getValue());
+  // TODO: Support non-dense constant.
+  if (!denseAttr)
+    return false;
+
+  assert(denseAttr.getElementType().isInteger(1) && "Unexpected type");
+
+  for (bool i1Value : denseAttr.getValues<bool>()) {
+    if (i1Value != value)
+      return false;
+  }
+
+  return true;
+}
+
+// TODO:
+struct SelectToExtSIBitcast : public OpRewritePattern<arith::SelectOp> {
+  using OpRewritePattern<arith::SelectOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(arith::SelectOp selectOp,
+                                PatternRewriter &rewriter) const override {
+    auto vecType = dyn_cast<VectorType>(selectOp.getType());
+    if (!vecType || !vecType.getElementType().isInteger(1))
+      return failure();
+
+    // Only scalar conditions can be sign-extended.
+    Value i1Cond = selectOp.getCondition();
+    if (isa<VectorType>(i1Cond.getType()))
+      return failure();
+
+    // TODO: Support n-D and scalable vectors.
+    if (vecType.getRank() != 1 || vecType.isScalable())
+      return failure();
+
+    auto trueConst = selectOp.getTrueValue().getDefiningOp<arith::ConstantOp>();
+    if (!trueConst || !allI1ConstantValuesSetTo(trueConst, true))
+      return failure();
+
+    auto falseConst =
+        selectOp.getFalseValue().getDefiningOp<arith::ConstantOp>();
+    if (!falseConst || !allI1ConstantValuesSetTo(falseConst, false))
+      return failure();
+
+    Location loc = selectOp.getLoc();
+    unsigned numI1Elements = vecType.getNumElements();
+    auto extType = rewriter.getIntegerType(numI1Elements);
+    if (numI1Elements > 1)
+      i1Cond = rewriter.createOrFold<arith::ExtSIOp>(loc, extType, i1Cond);
+
+    auto insertType = VectorType::get(/*shape=*/ {1}, extType);
+    auto insertOp = rewriter.createOrFold<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(insertType));
+    i1Cond = rewriter.createOrFold<vector::InsertOp>(loc, i1Cond, insertOp,
+                                                     /*pos=*/0);
+    rewriter.replaceOpWithNewOp<vector::BitCastOp>(selectOp, vecType, i1Cond);
+    return success();
+  }
+};
+
 // Drop inner most contiguous unit dimensions from transfer_read operand.
 class DropInnerMostUnitDims : public OpRewritePattern<vector::TransferReadOp> {
   using OpRewritePattern::OpRewritePattern;
@@ -1327,6 +1388,7 @@ void mlir::vector::populateVectorMaskMaterializationPatterns(
                MaterializeTransferMask<vector::TransferReadOp>,
                MaterializeTransferMask<vector::TransferWriteOp>>(
       patterns.getContext(), force32BitVectorIndices, benefit);
+  patterns.add<SelectToExtSIBitcast>(patterns.getContext(), benefit);
 }
 
 void mlir::vector::populateShapeCastFoldingPatterns(RewritePatternSet &patterns,
