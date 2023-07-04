@@ -15009,27 +15009,6 @@ static SDValue lowerShuffleOfExtractsAsVperm(const SDLoc &DL, SDValue N0,
                      DAG.getIntPtrConstant(0, DL));
 }
 
-static int getSingleNonZeroMaskIndex(SDValue Mask) {
-  SDNode *MaskNode = Mask.getNode();
-  if (MaskNode->getOpcode() != ISD::BUILD_VECTOR)
-    return -1;
-
-  int NonZeroIndex = -1;
-  for (int Index = 0, NumOperands = MaskNode->getNumOperands();
-       Index < NumOperands; ++Index) {
-    SDValue MaskOperand = MaskNode->getOperand(Index);
-    if (auto *ConstantVal = dyn_cast<ConstantSDNode>(MaskOperand)) {
-      if (ConstantVal->getAPIntValue() == 0)
-        continue;
-    }
-    if (NonZeroIndex != -1)
-      return -1;
-    NonZeroIndex = Index;
-  }
-
-  return NonZeroIndex;
-}
-
 /// Try to lower broadcast of a single element.
 ///
 /// For convenience, this code also bundles all of the subtarget feature set
@@ -15158,61 +15137,13 @@ static SDValue lowerShuffleAsBroadcast(const SDLoc &DL, MVT VT, SDValue V1,
           DAG.getMachineFunction().getMachineMemOperand(
               Ld->getMemOperand(), Offset, SVT.getStoreSize()));
       DAG.makeEquivalentMemoryOrdering(Ld, V);
-
       return DAG.getBitcast(VT, V);
     }
     assert(SVT == MVT::f64 && "Unexpected VT!");
     V = DAG.getLoad(SVT, DL, Ld->getChain(), NewAddr,
                     DAG.getMachineFunction().getMachineMemOperand(
                         Ld->getMemOperand(), Offset, SVT.getStoreSize()));
-    DAG.makeEquivalentMemoryOrdering(SDValue(Ld, 1), V.getValue(1));
-  } else if (ISD::isNormalMaskedLoad(V.getNode()) &&
-             cast<MaskedLoadSDNode>(V)->isSimple() &&
-             Opcode == X86ISD::VBROADCAST && BroadcastIdx == 0) {
-    if (!V->hasOneUse())
-      return SDValue();
-
-    // Reduce the single-element vector masked load and shuffle to a broadcasted
-    // masked load. The mask of the broadcast is the broadcasted single bit of
-    // the masked load that can potentially be non-zero.
-    MaskedLoadSDNode *MaskedLd = cast<MaskedLoadSDNode>(V);
-    SDValue BaseAddr = MaskedLd->getOperand(1);
-    MVT SVT = VT.getScalarType();
-    unsigned Offset = BroadcastIdx * SVT.getStoreSize();
-    assert((int)(Offset * 8) == BitOffset && "Unexpected bit-offset");
-    SDValue NewAddr =
-        DAG.getMemBasePlusOffset(BaseAddr, TypeSize::Fixed(Offset), DL);
-
-    // TODO.
-    SDValue Mask = MaskedLd->getMask();
-    MVT MaskType = Mask.getSimpleValueType();
-    //MVT BcastMaskType = MVT::getVectorVT(MaskType.getVectorElementType(),
-    //                                     VT.getVectorNumElements());
-    // TODO: Sink the mask into the block.
-    MVT IntMaskType = MVT::getIntegerVT(MaskType.getSizeInBits());
-    SDValue IntMask = DAG.getBitcast(IntMaskType, Mask);
-    SDValue BcastMask = DAG.getBitcast(
-        MaskType,
-        DAG.getNode(ISD::SUB, DL, IntMaskType,
-                    DAG.getTargetConstant(0, DL, IntMaskType), IntMask));
-
-    SDValue PassThru = MaskedLd->getPassThru();
-    SmallVector<int, 64> ShuffleMask(VT.getVectorNumElements(), BroadcastIdx);
-    SDValue BcastPassThru =
-        DAG.getVectorShuffle(VT, DL, PassThru, DAG.getUNDEF(VT), ShuffleMask);
-
-    // Directly form VBROADCAST_MASKEDLOAD for VBROADCAST opcode.
-    SDVTList Tys = DAG.getVTList(VT, MVT::Other);
-    SDValue Ops[] = {MaskedLd->getChain(), NewAddr,
-                     DAG.getUNDEF(NewAddr.getValueType()), BcastMask,
-                     BcastPassThru};
-
-    V = DAG.getMemIntrinsicNode(
-        X86ISD::VBROADCAST_MASKEDLOAD, DL, Tys, Ops, SVT,
-        DAG.getMachineFunction().getMachineMemOperand(
-            MaskedLd->getMemOperand(), Offset, SVT.getStoreSize()));
-    DAG.makeEquivalentMemoryOrdering(SDValue(MaskedLd, 1), V.getValue(1));
-    return DAG.getBitcast(VT, V);
+    DAG.makeEquivalentMemoryOrdering(Ld, V);
   } else if (!BroadcastFromReg) {
     // We can't broadcast from a vector register.
     return SDValue();
@@ -35642,7 +35573,6 @@ const char *X86TargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(UNPCKH)
   NODE_NAME_CASE(VBROADCAST)
   NODE_NAME_CASE(VBROADCAST_LOAD)
-  NODE_NAME_CASE(VBROADCAST_MASKEDLOAD)
   NODE_NAME_CASE(VBROADCASTM)
   NODE_NAME_CASE(SUBV_BROADCAST_LOAD)
   NODE_NAME_CASE(VPERMILPV)
