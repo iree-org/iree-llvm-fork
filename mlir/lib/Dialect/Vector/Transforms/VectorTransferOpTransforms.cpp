@@ -602,11 +602,24 @@ static bool isMaskedScalarLoad(vector::TransferReadOp xferOp) {
   if (!mask)
     return false;
 
-  auto vecType = xferOp.getVectorType();
-  if (vecType.getRank() != 1)
+  auto andMask = mask.getDefiningOp<arith::AndIOp>();
+  if (!andMask)
+    return false;
+  Value andOp0 = andMask.getOperand(0);
+  Value andOp1 = andMask.getOperand(1);
+  auto createMaskOp = andOp0.getDefiningOp<vector::CreateMaskOp>();
+  auto constantMaskOp = andOp1.getDefiningOp<vector::ConstantMaskOp>();
+  if (!createMaskOp && !constantMaskOp)
     return false;
 
-  return vecType.getShape()[0] == 1;
+  auto maskDimsAttrs = constantMaskOp.getMaskDimSizes().getValue();
+  SmallVector<int64_t> maskDims;
+  llvm::transform(
+      maskDimsAttrs, std::back_inserter(maskDims),
+      [](Attribute dimAttr) { return cast<IntegerAttr>(dimAttr).getInt(); });
+
+  return std::all_of(maskDims.begin(), maskDims.end(),
+                     [](int64_t dimSize) { return dimSize == 1; });
 }
 
 /// Base class for `vector.extract/vector.extract_element(vector.transfer_read)`
@@ -700,33 +713,20 @@ class RewriteScalarExtractElementOfTransferRead
       }
 
       // Masked case.
-
-      // Extract single bit element from original mask.
-      Value oldMask = xferOp.getMask();
-      Value oneBitScalarMask = rewriter.create<vector::ExtractOp>(
-          loc, oldMask, extractOp.getPosition());
-
-      // Create a vector<1xi1> mask with the single bit element.
-      VectorType oldMaskType = xferOp.getMaskType();
-      auto oneElementMaskType = VectorType::get(
-          /*shape=*/{1}, oldMaskType.getElementType(),
-          oldMaskType.getNumScalableDims());
-      Value oneBitVectorMask = rewriter.create<arith::ConstantOp>(
-          loc, DenseIntElementsAttr::get(oneElementMaskType, /*value=*/false));
-      SmallVector<int64_t> position = {0};
-      oneBitVectorMask = rewriter.create<vector::InsertOp>(
-          loc, oneBitScalarMask, oneBitVectorMask, position);
-
-      auto oneElementVecType = VectorType::get(
-          /*shape=*/{1}, xferOp.getVectorType().getElementType(),
-          xferOp.getVectorType().getNumScalableDims());
-      Value maskedRead = rewriter.create<vector::TransferReadOp>(
-          loc, oneElementVecType, xferOp.getSource(), newIndices,
-          rewriter.getDimIdentityMap(), xferOp.getPadding(), oneBitVectorMask,
-          /*inBoundsAttr=*/rewriter.getBoolArrayAttr({true}));
-
+      auto oldMask = xferOp.getMask();
+      unsigned numDims = oldMask.getType().getRank();
+      SmallVector<int64_t> maskSizes(numDims, 1);
+      auto singleElementMask = rewriter.create<vector::ConstantMaskOp>(
+          loc, oldMask.getType(), rewriter.getI64ArrayAttr(maskSizes));
+      auto newMask = rewriter.create<arith::AndIOp>(
+          loc, oldMask.getType(), oldMask, singleElementMask);
+      auto maskedRead = rewriter.create<vector::TransferReadOp>(
+          loc, xferOp.getVectorType(), xferOp.getSource(), newIndices,
+          xferOp.getPermutationMap(), xferOp.getPadding(), newMask,
+          xferOp.getInBoundsAttr());
+      SmallVector<int64_t> extractPos(numDims, 0);
       rewriter.replaceOpWithNewOp<vector::ExtractOp>(extractOp, maskedRead,
-                                                     position);
+                                                     extractPos);
       return;
     }
 
@@ -778,33 +778,20 @@ class RewriteScalarExtractOfTransferRead
       }
 
       // Masked case.
-
-      // Extract single bit element from original mask.
-      Value oldMask = xferOp.getMask();
-      Value oneBitScalarMask = rewriter.create<vector::ExtractOp>(
-          loc, oldMask, extractOp.getPosition());
-
-      // Create a vector<1xi1> mask with the single bit element.
-      VectorType oldMaskType = xferOp.getMaskType();
-      auto oneElementMaskType = VectorType::get(
-          /*shape=*/{1}, oldMaskType.getElementType(),
-          oldMaskType.getNumScalableDims());
-      Value oneBitVectorMask = rewriter.create<arith::ConstantOp>(
-          loc, DenseIntElementsAttr::get(oneElementMaskType, /*value=*/false));
-      SmallVector<int64_t> position = {0};
-      oneBitVectorMask = rewriter.create<vector::InsertOp>(
-          loc, oneBitScalarMask, oneBitVectorMask, position);
-
-      auto oneElementVecType = VectorType::get(
-          /*shape=*/{1}, xferOp.getVectorType().getElementType(),
-          xferOp.getVectorType().getNumScalableDims());
-      Value maskedRead = rewriter.create<vector::TransferReadOp>(
-          loc, oneElementVecType, xferOp.getSource(), newIndices,
-          rewriter.getDimIdentityMap(), xferOp.getPadding(), oneBitVectorMask,
-          /*inBoundsAttr=*/rewriter.getBoolArrayAttr({true}));
-
+      auto oldMask = xferOp.getMask();
+      unsigned numDims = oldMask.getType().getRank();
+      SmallVector<int64_t> maskSizes(numDims, 1);
+      auto singleElementMask = rewriter.create<vector::ConstantMaskOp>(
+          loc, oldMask.getType(), rewriter.getI64ArrayAttr(maskSizes));
+      auto newMask = rewriter.create<arith::AndIOp>(
+          loc, oldMask.getType(), oldMask, singleElementMask);
+      auto maskedRead = rewriter.create<vector::TransferReadOp>(
+          loc, xferOp.getVectorType(), xferOp.getSource(), newIndices,
+          xferOp.getPermutationMap(), xferOp.getPadding(), newMask,
+          xferOp.getInBoundsAttr());
+      SmallVector<int64_t> extractPos(numDims, 0);
       rewriter.replaceOpWithNewOp<vector::ExtractOp>(extractOp, maskedRead,
-                                                     position);
+                                                     extractPos);
       return;
     }
 
