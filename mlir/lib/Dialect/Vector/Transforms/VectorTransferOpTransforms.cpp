@@ -610,7 +610,7 @@ static bool isMaskedScalarLoad(vector::TransferReadOp xferOp) {
   if (!maskConst)
     return false;
   auto boolAttr = dyn_cast<DenseIntElementsAttr>(maskConst.getValue());
-  if (!boolAttr || boolAttr.getNumElements() != 4)
+  if (!boolAttr || boolAttr.getNumElements() != 16)
     return false;
 
   auto maskValues = boolAttr.getValues<bool>();
@@ -652,8 +652,12 @@ public:
         }))
       return failure();
     // Mask not supported.
-    if (xferOp.getMask() && (!isa<MemRefType>(xferOp.getSource().getType()) ||
-                             isMaskedScalarLoad(xferOp)))
+    // TODO: Remove element type check.
+    if (xferOp.getMask() &&
+        (xferOp.getVectorType().getElementType().getIntOrFloatBitWidth() !=
+             32 ||
+         !isa<MemRefType>(xferOp.getSource().getType()) ||
+         isMaskedScalarLoad(xferOp)))
       return failure();
     // Map not supported.
     if (!xferOp.getPermutationMap().isMinorIdentity())
@@ -713,7 +717,7 @@ class RewriteScalarExtractElementOfTransferRead
       auto singleMaskBit = rewriter.create<vector::ExtractOp>(
           loc, oldMask, extractOp.getPosition());
 
-      constexpr int64_t singleDimSize = 4;
+      constexpr int64_t singleDimSize = 16;
       auto newMaskType = VectorType::get({singleDimSize}, rewriter.getI1Type());
       SmallVector<bool> newInitMaskVals(singleDimSize, false);
       auto newInitMask = rewriter.create<arith::ConstantOp>(
@@ -783,12 +787,13 @@ class RewriteScalarExtractOfTransferRead
       auto singleMaskBit = rewriter.create<vector::ExtractOp>(
           loc, oldMask, extractOp.getPosition());
 
-      constexpr int64_t singleDimSize = 4;
+      constexpr int64_t singleDimSize = 16;
       auto newMaskType = VectorType::get({singleDimSize}, rewriter.getI1Type());
       SmallVector<bool> newInitMaskVals(singleDimSize, false);
       auto newInitMask = rewriter.create<arith::ConstantOp>(
           loc, newMaskType, rewriter.getBoolVectorAttr(newInitMaskVals));
-      auto newMask = rewriter.create<vector::InsertOp>(loc, singleMaskBit, newInitMask, 0);
+      auto newMask =
+          rewriter.create<vector::InsertOp>(loc, singleMaskBit, newInitMask, 0);
 
       auto newXferType = VectorType::get(
           {singleDimSize}, xferOp.getVectorType().getElementType());
