@@ -171,6 +171,14 @@ void populateSpecializedTransposeLoweringPatterns(
     int benefit = 10);
 
 } // namespace avx2
+
+namespace avx512 {
+
+// TODO
+void populateFMAMaskBackwardPropagationPatterns(RewritePatternSet &patterns);
+
+} // namespace avx512
+
 } // namespace x86vector
 
 /// Collect a set of patterns to lower X86Vector ops to ops that map to LLVM
