@@ -1108,10 +1108,6 @@ struct SelectToExtSIBitcast : public OpRewritePattern<arith::SelectOp> {
     if (vecType.getRank() != 1 || vecType.isScalable())
       return failure();
 
-    // TODO: Support vectors with multiple elements.
-    if (vecType.getShape()[0] != 1)
-      return failure();
-
     auto trueConst = selectOp.getTrueValue().getDefiningOp<arith::ConstantOp>();
     if (!trueConst || !allI1ConstantValuesSetTo(trueConst, true))
       return failure();
