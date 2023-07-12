@@ -506,30 +506,12 @@ def NVVM_SyncWarpOp :
   let assemblyFormat = "$mask attr-dict `:` type($mask)";
 }
 
-// https://docs.nvidia.com/cuda/parallel-thread-execution/#id62
-def LoadCacheModifierCA : I32EnumAttrCase<"CA", 0, "ca">;
-def LoadCacheModifierCG : I32EnumAttrCase<"CG", 1, "cg">;
-def LoadCacheModifierCS : I32EnumAttrCase<"CS", 2, "cs">;
-def LoadCacheModifierLU : I32EnumAttrCase<"LU", 3, "lu">;
-def LoadCacheModifierCV : I32EnumAttrCase<"CV", 4, "cv">;
 
-/// Enum attribute of the different kinds.
-def LoadCacheModifierKind : I32EnumAttr<"LoadCacheModifierKind", 
-                                "NVVM load cache modifier kind",
-  [LoadCacheModifierCA, LoadCacheModifierCG, LoadCacheModifierCS, 
-    LoadCacheModifierLU, LoadCacheModifierCV]> {
-  let genSpecializedAttr = 0;
-  let cppNamespace = "::mlir::NVVM";
-}
-
-def LoadCacheModifierAttr : EnumAttr<NVVM_Dialect, LoadCacheModifierKind, "load_cache_modifier">;
-
-def NVVM_CpAsyncOp : NVVM_Op<"cp.async.shared.global", [DeclareOpInterfaceMethods<BasicPtxBuilderOpInterface>]>,
+def NVVM_CpAsyncOp : NVVM_Op<"cp.async.shared.global">,
   Arguments<(ins LLVM_i8Ptr_shared:$dst,
                  LLVM_i8Ptr_global:$src,
                  I32Attr:$size,
-                 LoadCacheModifierAttr:$modifier,
-                 Optional<LLVM_Type>:$cpSize)> {
+                 OptionalAttr<UnitAttr>:$bypass_l1)> {
   string llvmBuilder = [{
       llvm::Intrinsic::ID id;
       switch ($size) {
@@ -540,40 +522,18 @@ def NVVM_CpAsyncOp : NVVM_Op<"cp.async.shared.global", [DeclareOpInterfaceMethod
           id = llvm::Intrinsic::nvvm_cp_async_ca_shared_global_8;
           break;
         case 16:
-          if($modifier == NVVM::LoadCacheModifierKind::CG)
+          if(static_cast<bool>($bypass_l1))
             id = llvm::Intrinsic::nvvm_cp_async_cg_shared_global_16;
-          else if($modifier == NVVM::LoadCacheModifierKind::CA)
+          else
             id = llvm::Intrinsic::nvvm_cp_async_ca_shared_global_16;
-          else 
-            llvm_unreachable("unsupported cache modifier");
           break;
         default:
           llvm_unreachable("unsupported async copy size");
       }
       createIntrinsicCall(builder, id, {$dst, $src});
   }];
-  let assemblyFormat = "$dst `,` $src `,` $size `,` `cache` `=` $modifier (`,` $cpSize^)? attr-dict `:` type(operands)";
+  let assemblyFormat = "$dst `,` $src `,` $size attr-dict `:` type(operands)";
   let hasVerifier = 1;
-  let extraClassDeclaration = [{
-    bool hasIntrinsic() { if(getCpSize()) return false; return true; }
-
-    void getAsmValues(RewriterBase &rewriter, 
-        llvm::SmallVectorImpl<std::pair<mlir::Value, mlir::NVVM::PTXRegisterMod>> &asmValues) {
-      asmValues.push_back({getDst(), PTXRegisterMod::Read});
-      asmValues.push_back({getSrc(), PTXRegisterMod::Read});
-      asmValues.push_back({makeConstantI32(rewriter, getSize()), PTXRegisterMod::Read});
-      asmValues.push_back({getCpSize(), PTXRegisterMod::Read});
-    }        
-  }];
-  let extraClassDefinition = [{        
-    const char* $cppClass::getPtx() { 
-      if(getModifier() == NVVM::LoadCacheModifierKind::CG)
-        return "cp.async.cg.shared.global [%0], [%1], %2, %3;\n"; 
-      if(getModifier() == NVVM::LoadCacheModifierKind::CA)
-        return "cp.async.ca.shared.global [%0], [%1], %2, %3;\n";        
-      llvm_unreachable("unsupported cache modifier");      
-    }
-  }];
 }
 
 def NVVM_CpAsyncCommitGroupOp : NVVM_Op<"cp.async.commit.group"> {
