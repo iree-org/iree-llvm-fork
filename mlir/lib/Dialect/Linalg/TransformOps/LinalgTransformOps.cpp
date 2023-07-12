@@ -3014,7 +3014,7 @@ transform::VectorizeOp::applyToOne(transform::TransformRewriter &rewriter,
                                                        /*benefit=*/2);
   vector::TransferReadOp::getCanonicalizationPatterns(patterns, ctx);
   vector::TransferWriteOp::getCanonicalizationPatterns(patterns, ctx);
-  tensor::populateFoldTensorSubsetIntoVectorTransferPatterns(patterns);
+  vector::populateVectorTransferTensorSliceTransforms(patterns);
 
   patterns.add<CopyVectorizationPattern>(ctx);
 

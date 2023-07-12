@@ -34,14 +34,9 @@ FailureOr<TilingResult> replaceExtractSliceWithTiledProducer(
 // Populate functions.
 //===----------------------------------------------------------------------===//
 
-/// Appends patterns for folding tensor subset ops into consumer load/store
-/// ops into `patterns`. (This includes patterns for folding tensor subset ops
-/// into vector transfer ops.)
+/// Appends patterns for folding tensor aliasing ops into consumer load/store
+/// ops into `patterns`.
 void populateFoldTensorSubsetOpPatterns(RewritePatternSet &patterns);
-
-/// Appends patterns for folding tensor subset ops into vector transfer ops.
-void populateFoldTensorSubsetIntoVectorTransferPatterns(
-    RewritePatternSet &patterns);
 
 /// Collects patterns to merge consecutive tensor.insert_slice/extract_slice
 /// into one. These patterns are in this separate entry point because the
