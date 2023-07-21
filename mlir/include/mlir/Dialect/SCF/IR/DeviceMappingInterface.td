@@ -36,10 +36,25 @@ def DeviceMappingAttrInterface : AttrInterface<"DeviceMappingAttrInterface"> {
   }];
 
  let methods = [
+    InterfaceMethod<
+      "Return mapping as an integer from the attribute.",
+      "int64_t", 
+      "getMappingId", 
+      (ins)
+    >,
+    InterfaceMethod<
+      "Return true if the attribute specifies a linear mapping",
+      "bool", 
+      "isLinearMapping", 
+      (ins)
+    >,
     InterfaceMethod<[{
-        Returns mapping as an integer from the attribute.
+      Return the [0..n) relative index of the attribute depending on its group.
+      This can be used to index into a contiguous array.
       }],
-      "int64_t", "getMappingId", (ins)
+      "int64_t", 
+      "getRelativeIndex", 
+      (ins)
     >
   ];
 }

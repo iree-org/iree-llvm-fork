@@ -236,12 +236,13 @@ transform.sequence failures(propagate) {
 !type = memref<2 x 32 x f32>
 !type1d = memref<32 x f32>
 
-// CHECK-DAG: #[[$MAPWX:.*]] = affine_map<(d0, d1) -> (((d0 + d1 * 12) floordiv 32) mod 3)>
-// CHECK-DAG: #[[$MAPWY:.*]] = affine_map<(d0, d1) -> ((((d0 + d1 * 12) floordiv 32) mod 6) floordiv 3)>
+// CHECK-DAG: #[[$MAPWLIN:.*]] = affine_map<(d0, d1) -> ((d0 + d1 * 18) floordiv 32)>
+// CHECK-DAG: #[[$MAPWX:.*]] = affine_map<(d0, d1) -> (((d0 + d1 * 18) floordiv 32) mod 3)>
+// CHECK-DAG: #[[$MAPWY:.*]] = affine_map<(d0, d1) -> ((((d0 + d1 * 18) floordiv 32) mod 6) floordiv 3)>
 
-// CHECK-DAG: #[[$MAPLIN:.*]] = affine_map<(d0, d1) -> (d0 + d1 * 12)>
-// CHECK-DAG: #[[$MAPLX:.*]] = affine_map<(d0, d1) -> ((d0 + d1 * 12) mod 10)>
-// CHECK-DAG: #[[$MAPLY:.*]] = affine_map<(d0, d1) -> (((d0 + d1 * 12) mod 20) floordiv 10)>
+// CHECK-DAG: #[[$MAPLIN:.*]] = affine_map<(d0, d1) -> (d0 + d1 * 18)>
+// CHECK-DAG: #[[$MAPLX:.*]] = affine_map<(d0, d1) -> ((d0 + d1 * 18) mod 10)>
+// CHECK-DAG: #[[$MAPLY:.*]] = affine_map<(d0, d1) -> ((d0 + d1 * 18) floordiv 10)>
 
 // CHECK-LABEL: func.func @map_multi_level(
 func.func @map_multi_level(%x: !type, %y: !type, %t: !type1d, %alpha : f32, %stream : !gpu.async.token) -> !type {
@@ -251,10 +252,12 @@ func.func @map_multi_level(%x: !type, %y: !type, %t: !type1d, %alpha : f32, %str
   %c7 = arith.constant 7 : index
   %c1 = arith.constant 1 : index
   %c2 = arith.constant 2 : index
+  %c3 = arith.constant 3 : index
 
   // CHECK-DAG: %[[C1:.*]] = arith.constant 1 : index
+  // CHECK-DAG: %[[C6:.*]] = arith.constant 6 : index
   // CHECK-DAG: %[[C11:.*]] = arith.constant 11 : index
-  // CHECK-DAG: %[[C12:.*]] = arith.constant 12 : index
+  // CHECK-DAG: %[[C18:.*]] = arith.constant 18 : index
   // CHECK-DAG: %[[C20:.*]] = arith.constant 20 : index
 
   // check that both the thread level and the warp level got distributed.
@@ -272,17 +275,16 @@ func.func @map_multi_level(%x: !type, %y: !type, %t: !type1d, %alpha : f32, %str
       memref.store %6, %y[%i, %j] : !type
     }  { mapping = [#gpu.thread<y>, #gpu.thread<x>]}
 
+    // CHECK-DAG: %[[WIDLIN:.*]] = affine.apply #[[$MAPWLIN]](%[[TIDX]], %[[TIDY]])
     // CHECK-DAG: %[[WIDX:.*]] = affine.apply #[[$MAPWX]](%[[TIDX]], %[[TIDY]])
     // CHECK-DAG: %[[WIDY:.*]] = affine.apply #[[$MAPWY]](%[[TIDX]], %[[TIDY]])
-    // CHECK-DAG: %[[CMPX:.*]] = arith.cmpi ult, %[[WIDX]], %[[C1]] : index
-    // CHECK-DAG: %[[CMPY:.*]] = arith.cmpi ult, %[[WIDY]], %[[C1]] : index
-    //     CHECK: %[[COND:.*]] = arith.andi %[[CMPX]], %[[CMPY]] : i1
-    //     CHECK: scf.if %[[COND]]
-    scf.forall (%i) in (%c1) {
-        %7 = memref.load %t[%i] : !type1d
+    // CHECK-DAG: %[[CMPLIN:.*]] = arith.cmpi ult, %[[WIDLIN]], %[[C6]] : index
+    //     CHECK: scf.if %[[CMPLIN]]
+    scf.forall (%i, %j, %k) in (%c3, %c2, %c1) {
+        %7 = memref.load %x[%i, %j] : !type
         %8 = arith.addf %alpha, %7 : f32
-        memref.store %8, %t[%i] : !type1d
-     }  {mapping = [#gpu.warp<x>] }
+        memref.store %8, %y[%i, %j] : !type
+     }  {mapping = [#gpu.warp<linear_dim_0>, #gpu.warp<linear_dim_1>, #gpu.warp<linear_dim_2>] }
 
     // CHECK-DAG: %[[LIN:.*]] = affine.apply #[[$MAPLIN]](%[[TIDX]], %[[TIDY]])
     // CHECK-DAG: %[[LIDX:.*]] = affine.apply #[[$MAPLX]](%[[TIDX]], %[[TIDY]])
@@ -295,7 +297,7 @@ func.func @map_multi_level(%x: !type, %y: !type, %t: !type1d, %alpha : f32, %str
         %7 = memref.load %t[%i] : !type1d
         %8 = arith.addf %alpha, %7 : f32
         memref.store %8, %t[%j] : !type1d
-     }  {mapping = [#gpu.linear<x>, #gpu.linear<y>] }
+     }  {mapping = [#gpu.thread<linear_dim_0>, #gpu.thread<linear_dim_1>] }
     gpu.terminator
   }
   return %y : !type
@@ -305,41 +307,5 @@ transform.sequence failures(propagate) {
 ^bb1(%arg0: !transform.any_op):
   %funcop = transform.structured.match ops{["gpu.launch"]} in %arg0 : (!transform.any_op) -> !transform.any_op
   transform.gpu.map_nested_forall_to_threads %funcop
-    block_dims = [12, 11, 1] warp_dims = [3, 2, 1] : (!transform.any_op) -> !transform.any_op
-}
-
-// -----
-
-// CHECK-LABEL: func.func @tiling_buffer_semantic_op(
-//       CHECK:   gpu.launch {{.*}} {
-//       CHECK:     scf.forall {{.*}} {
-//       CHECK:       memref.subview
-//       CHECK:       memref.subview
-//       CHECK:       linalg.generic
-//       CHECK:     }
-//       CHECK:   }
-func.func @tiling_buffer_semantic_op(%x: memref<32x32xf32>, %y: memref<32x32xf32>, %stream : !gpu.async.token) {
-  %one = arith.constant 1 : index
-  %name = gpu.launch async[%stream] blocks(%arg3, %arg4, %arg5) in (%arg9 = %one, %arg10 = %one, %arg11 = %one)
-            threads(%arg6, %arg7, %arg8) in (%arg12 = %one, %arg13 = %one, %arg14 = %one)
-  {
-    linalg.generic
-      {indexing_maps = [affine_map<(d0, d1) -> (d0, d1)>,
-                        affine_map<(d0, d1) -> (d0, d1)>],
-       iterator_types = ["parallel", "parallel"]}
-      ins(%x : memref<32x32xf32>)
-      outs(%y : memref<32x32xf32>) {
-        ^bb0(%in: f32, %out: f32):
-          linalg.yield %in : f32
-    }
-    gpu.terminator
-  }
-  return
-}
-
-transform.sequence failures(propagate) {
-^bb1(%arg0: !transform.any_op):
-  %matmul = transform.structured.match ops{["linalg.generic"]} in %arg0 : (!transform.any_op) -> !transform.any_op
-  %forall, %tiled = transform.structured.tile_to_forall_op %matmul num_threads [10, 20, 30] (mapping = [ #gpu.thread<y>, #gpu.thread<x>, #gpu.thread<z> ] )
-    : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+    block_dims = [18, 11, 1] : (!transform.any_op) -> !transform.any_op
 }
