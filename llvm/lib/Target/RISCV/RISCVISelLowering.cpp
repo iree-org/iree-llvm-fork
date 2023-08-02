@@ -3456,21 +3456,9 @@ static MVT getLMUL1VT(MVT VT) {
 static SDValue lowerScalarInsert(SDValue Scalar, SDValue VL, MVT VT,
                                  const SDLoc &DL, SelectionDAG &DAG,
                                  const RISCVSubtarget &Subtarget) {
-  assert(VT.isScalableVector() && "Expect VT is scalable vector type.");
-
   const MVT XLenVT = Subtarget.getXLenVT();
+
   SDValue Passthru = DAG.getUNDEF(VT);
-
-  if (Scalar.getOpcode() == ISD::EXTRACT_VECTOR_ELT &&
-      isNullConstant(Scalar.getOperand(1))) {
-    MVT ExtractedVT = Scalar.getOperand(0).getSimpleValueType();
-    if (ExtractedVT.bitsLE(VT))
-      return DAG.getNode(ISD::INSERT_SUBVECTOR, DL, VT, Passthru,
-                         Scalar.getOperand(0), DAG.getConstant(0, DL, XLenVT));
-    return DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, VT, Scalar.getOperand(0),
-                       DAG.getConstant(0, DL, XLenVT));
-  }
-
   if (VT.isFloatingPoint()) {
     // TODO: Use vmv.v.i for appropriate constants
     // Use M1 or smaller to avoid over constraining register allocation
@@ -7657,25 +7645,6 @@ static SDValue lowerReductionSeq(unsigned RVVOpcode, MVT ResVT,
                      DAG.getConstant(0, DL, XLenVT));
 }
 
-// Function to extract the first element of Vec. For fixed vector Vec, this
-// converts it to a scalable vector before extraction, so subsequent
-// optimizations don't have to handle fixed vectors.
-static SDValue getFirstElement(SDValue Vec, SelectionDAG &DAG,
-                               const RISCVSubtarget &Subtarget) {
-  SDLoc DL(Vec);
-  MVT XLenVT = Subtarget.getXLenVT();
-  MVT VecVT = Vec.getSimpleValueType();
-  MVT VecEltVT = VecVT.getVectorElementType();
-
-  MVT ContainerVT = VecVT;
-  if (VecVT.isFixedLengthVector()) {
-    ContainerVT = getContainerForFixedLengthVector(DAG, VecVT, Subtarget);
-    Vec = convertToScalableVector(ContainerVT, Vec, DAG, Subtarget);
-  }
-  return DAG.getNode(ISD::EXTRACT_VECTOR_ELT, DL, VecEltVT, Vec,
-                     DAG.getConstant(0, DL, XLenVT));
-}
-
 SDValue RISCVTargetLowering::lowerVECREDUCE(SDValue Op,
                                             SelectionDAG &DAG) const {
   SDLoc DL(Op);
@@ -7710,17 +7679,9 @@ SDValue RISCVTargetLowering::lowerVECREDUCE(SDValue Op,
 
   auto [Mask, VL] = getDefaultVLOps(VecVT, ContainerVT, DL, DAG, Subtarget);
 
-  SDValue StartV = DAG.getNeutralElement(BaseOpc, DL, VecEltVT, SDNodeFlags());
-  switch (BaseOpc) {
-  case ISD::AND:
-  case ISD::OR:
-  case ISD::UMAX:
-  case ISD::UMIN:
-  case ISD::SMAX:
-  case ISD::SMIN:
-    StartV = getFirstElement(Vec, DAG, Subtarget);
-  }
-  return lowerReductionSeq(RVVOpcode, Op.getSimpleValueType(), StartV, Vec,
+  SDValue NeutralElem =
+      DAG.getNeutralElement(BaseOpc, DL, VecEltVT, SDNodeFlags());
+  return lowerReductionSeq(RVVOpcode, Op.getSimpleValueType(), NeutralElem, Vec,
                            Mask, VL, DL, DAG, Subtarget);
 }
 
@@ -7728,11 +7689,11 @@ SDValue RISCVTargetLowering::lowerVECREDUCE(SDValue Op,
 // the vector SDValue and the scalar SDValue required to lower this to a
 // RISCVISD node.
 static std::tuple<unsigned, SDValue, SDValue>
-getRVVFPReductionOpAndOperands(SDValue Op, SelectionDAG &DAG, EVT EltVT,
-                               const RISCVSubtarget &Subtarget) {
+getRVVFPReductionOpAndOperands(SDValue Op, SelectionDAG &DAG, EVT EltVT) {
   SDLoc DL(Op);
   auto Flags = Op->getFlags();
   unsigned Opcode = Op.getOpcode();
+  unsigned BaseOpcode = ISD::getVecReduceBaseOpcode(Opcode);
   switch (Opcode) {
   default:
     llvm_unreachable("Unhandled reduction");
@@ -7747,10 +7708,10 @@ getRVVFPReductionOpAndOperands(SDValue Op, SelectionDAG &DAG, EVT EltVT,
                            Op.getOperand(0));
   case ISD::VECREDUCE_FMIN:
     return std::make_tuple(RISCVISD::VECREDUCE_FMIN_VL, Op.getOperand(0),
-                           getFirstElement(Op.getOperand(0), DAG, Subtarget));
+                           DAG.getNeutralElement(BaseOpcode, DL, EltVT, Flags));
   case ISD::VECREDUCE_FMAX:
     return std::make_tuple(RISCVISD::VECREDUCE_FMAX_VL, Op.getOperand(0),
-                           getFirstElement(Op.getOperand(0), DAG, Subtarget));
+                           DAG.getNeutralElement(BaseOpcode, DL, EltVT, Flags));
   }
 }
 
@@ -7762,7 +7723,7 @@ SDValue RISCVTargetLowering::lowerFPVECREDUCE(SDValue Op,
   unsigned RVVOpcode;
   SDValue VectorVal, ScalarVal;
   std::tie(RVVOpcode, VectorVal, ScalarVal) =
-      getRVVFPReductionOpAndOperands(Op, DAG, VecEltVT, Subtarget);
+      getRVVFPReductionOpAndOperands(Op, DAG, VecEltVT);
   MVT VecVT = VectorVal.getSimpleValueType();
 
   MVT ContainerVT = VecVT;
