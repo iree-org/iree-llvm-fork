@@ -647,6 +647,16 @@ public:
                            TypeConverter::SignatureConversion &conversion,
                            const TypeConverter *converter = nullptr);
 
+  /// Apply signature conversion to a given block. The method replaces the old
+  /// block with a new block with converted signature, so using `block` after
+  /// this method is illegal. Returns the new block created in the process.
+  ///
+  /// If provided, `converter` will be used for any materializations.
+  Block *
+  applySignatureConversion(Block *block,
+                           TypeConverter::SignatureConversion &conversion,
+                           TypeConverter *converter = nullptr);
+
   /// Convert the types of block arguments within the given region. This
   /// replaces each block with a new block containing the updated signature. The
   /// entry block may have a special conversion if `entryConversion` is
