@@ -1496,6 +1496,17 @@ Block *ConversionPatternRewriter::applySignatureConversion(
   return impl->applySignatureConversion(region, conversion, converter);
 }
 
+Block *ConversionPatternRewriter::applySignatureConversion(
+    Block *block, TypeConverter::SignatureConversion &conversion,
+    TypeConverter *converter) {
+  FailureOr<Block *> convertedBlock =
+      impl->convertBlockSignature(block, converter, &conversion);
+  if (succeeded(convertedBlock)) {
+    return *convertedBlock;
+  }
+  return nullptr;
+}
+
 FailureOr<Block *> ConversionPatternRewriter::convertRegionTypes(
     Region *region, TypeConverter &converter,
     TypeConverter::SignatureConversion *entryConversion) {
