@@ -220,6 +220,32 @@ struct PackOpTiling
 
     return success();
   }
+
+  FailureOr<TilingResult>
+  generateResultTileValue(Operation *op, OpBuilder &b, unsigned resultNumber,
+                          ArrayRef<OpFoldResult> offsets,
+                          ArrayRef<OpFoldResult> sizes) const {
+    auto packOp = cast<PackOp>(op);
+    int64_t numTiles = packOp.getInnerDimsPos().size();
+    if (!all_of(offsets.take_back(numTiles),
+                [](auto offset) { return isConstantIntValue(offset, 0); })) {
+      return failure();
+    }
+    if (!all_of(llvm::zip_equal(packOp.getMixedTiles(),
+                                sizes.take_back(numTiles)),
+                [](auto tuple) {
+                  return isEqualConstantIntOrValue(std::get<0>(tuple),
+                                                   std::get<1>(tuple));
+                })) {
+      return failure();
+    }
+
+    FailureOr<TilingResult> tilingResult = getTiledImplementation(
+        op, b, offsets.drop_back(numTiles), sizes.drop_back(numTiles));
+    if (failed(tilingResult))
+      return failure();
+    return tilingResult.value();
+  }
 };
 
 struct UnpackTileDimInfo {
