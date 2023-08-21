@@ -4006,6 +4006,24 @@ cc_library(
 )
 
 cc_library(
+    name = "ControlFlowTransforms",
+    srcs = glob([
+        "lib/Dialect/ControlFlow/Transforms/*.cpp",
+    ]),
+    hdrs = glob([
+        "include/mlir/Dialect/ControlFlow/Transforms/*.h",
+    ]),
+    includes = ["include"],
+    deps = [
+        ":BufferizationDialect",
+        ":BufferizationTransforms",
+        ":ControlFlowDialect",
+        ":IR",
+        ":MemRefDialect",
+    ],
+)
+
+cc_library(
     name = "FuncDialect",
     srcs = glob(
         [
@@ -8164,6 +8182,7 @@ cc_library(
         ":ComplexToLibm",
         ":ComplexToSPIRV",
         ":ControlFlowDialect",
+        ":ControlFlowTransforms",
         ":ConversionPasses",
         ":ConvertToLLVM",
         ":DLTIDialect",

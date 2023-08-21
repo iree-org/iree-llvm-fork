@@ -11,6 +11,7 @@
 
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/DenseMapInfoVariant.h"
 #include "llvm/ADT/SetVector.h"
@@ -411,6 +412,10 @@ struct TraversalConfig {
   /// Specifies whether OpOperands with a different type that are not the result
   /// of a CastOpInterface op should be followed.
   bool followSameTypeOrCastsOnly = false;
+
+  /// Specifies whether already visited values should be visited again.
+  /// (Note: This can result in infinite looping.)
+  bool revisitAlreadyVisitedValues = false;
 };
 
 /// AnalysisState provides a variety of helper functions for dealing with
@@ -725,5 +730,180 @@ MLIR_DECLARE_EXPLICIT_TYPE_ID(mlir::bufferization::AnalysisState)
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h.inc"
+
+//===----------------------------------------------------------------------===//
+// Helpers for Unstructured Control Flow
+//===----------------------------------------------------------------------===//
+
+namespace mlir {
+namespace bufferization {
+
+/// A template that provides a default implementation of `getAliasingOpOperands`
+/// for ops that support unstructured control flow within their regions.
+template <typename ConcreteModel, typename ConcreteOp>
+struct OpWithUnstructuredControlFlowBufferizableOpInterfaceExternalModel
+    : public BufferizableOpInterface::ExternalModel<ConcreteModel, ConcreteOp> {
+
+  /// Return a list of operands that are forwarded to the given block argument.
+  /// I.e., find all predecessors of the block argument's owner and gather the
+  /// operands that are equivalent to the block argument.
+  static SmallVector<OpOperand *> getCallerOpOperands(BlockArgument bbArg) {
+    SmallVector<OpOperand *> result;
+    Block *block = bbArg.getOwner();
+    for (Operation *caller : block->getUsers()) {
+      auto branchOp = dyn_cast<BranchOpInterface>(caller);
+      if (!branchOp)
+        continue;
+      auto it = llvm::find(caller->getSuccessors(), block);
+      assert(it != caller->getSuccessors().end() && "could find successor");
+      int64_t successorIdx = std::distance(caller->getSuccessors().begin(), it);
+      SuccessorOperands operands = branchOp.getSuccessorOperands(successorIdx);
+      assert(operands.getProducedOperandCount() == 0 &&
+             "produced operands not supported");
+      int64_t operandIndex =
+          operands.getForwardedOperands().getBeginOperandIndex() +
+          bbArg.getArgNumber();
+      result.push_back(&caller->getOpOperand(operandIndex));
+    }
+    return result;
+  }
+
+  AliasingOpOperandList
+  getAliasingOpOperands(Operation *op, Value value,
+                        const AnalysisState &state) const {
+    // This is a default implementation for block arguments only. If the op also
+    // has tensor results, the external model should define its own
+    // implementation and call this base function in case of a block argument.
+    AliasingOpOperandList result;
+    auto bbArg = dyn_cast<BlockArgument>(value);
+    if (!bbArg)
+      return result;
+
+    // Gather aliasing OpOperands of all operations (callers) that link to
+    // this block.
+    for (OpOperand *opOperand : getCallerOpOperands(bbArg))
+      result.addAlias(
+          {opOperand, BufferRelation::Equivalent, /*isDefinite=*/false});
+
+    return result;
+  }
+
+  FailureOr<BaseMemRefType>
+  getBufferType(Operation *op, Value value, const BufferizationOptions &options,
+                SmallVector<Value> &invocationStack) const {
+    // This is a default implementation for block arguments only. If the op also
+    // has tensor results, the external model should define its own
+    // implementation and call this base function in case of a block argument.
+    if (isa<OpResult>(value))
+      return bufferization::detail::defaultGetBufferType(value, options,
+                                                         invocationStack);
+
+    // Compute the buffer type of the block argument by computing the bufferized
+    // operand types of all forwarded values. If these are all the same type,
+    // take that type. Otherwise, take only the memory space and fall back to a
+    // buffer type with a fully dynamic layout map.
+    BaseMemRefType bufferType;
+    auto tensorType = cast<RankedTensorType>(value.getType());
+    for (OpOperand *opOperand :
+         getCallerOpOperands(cast<BlockArgument>(value))) {
+
+      // If the forwarded operand is already on the invocation stack, we ran
+      // into a loop and this operand cannot be used to compute the bufferized
+      // type.
+      if (llvm::find(invocationStack, opOperand->get()) !=
+          invocationStack.end())
+        continue;
+
+      // Compute the bufferized type of the forwarded operand.
+      BaseMemRefType callerType;
+      if (auto memrefType =
+              dyn_cast<BaseMemRefType>(opOperand->get().getType())) {
+        // The operand was already bufferized. Take its type directly.
+        callerType = memrefType;
+      } else {
+        FailureOr<BaseMemRefType> maybeCallerType =
+            bufferization::getBufferType(opOperand->get(), options,
+                                         invocationStack);
+        if (failed(maybeCallerType))
+          return failure();
+        callerType = *maybeCallerType;
+      }
+
+      if (!bufferType) {
+        // This is the first buffer type that we computed.
+        bufferType = callerType;
+        continue;
+      }
+
+      if (bufferType == callerType)
+        continue;
+
+        // If the computed buffer type does not match the computed buffer type
+        // of the earlier forwarded operands, fall back to a buffer type with a
+        // fully dynamic layout map.
+#ifndef NDEBUG
+      assert(llvm::all_equal({bufferType.getShape(), callerType.getShape(),
+                              tensorType.getShape()}) &&
+             "expected same shape");
+#endif // NDEBUG
+
+      if (bufferType.getMemorySpace() != callerType.getMemorySpace())
+        return op->emitOpError("incoming operands of block argument have "
+                               "inconsistent memory spaces");
+
+      bufferType = getMemRefTypeWithFullyDynamicLayout(
+          tensorType, bufferType.getMemorySpace());
+    }
+
+    if (!bufferType)
+      return op->emitOpError("could not infer buffer type of block argument");
+
+    return bufferType;
+  }
+};
+
+/// A template that provides a default implementation of `getAliasingValues`
+/// for ops that implement the `BranchOpInterface`.
+template <typename ConcreteModel, typename ConcreteOp>
+struct BranchOpBufferizableOpInterfaceExternalModel
+    : public BufferizableOpInterface::ExternalModel<ConcreteModel, ConcreteOp> {
+  AliasingValueList getAliasingValues(Operation *op, OpOperand &opOperand,
+                                      const AnalysisState &state) const {
+    AliasingValueList result;
+    auto branchOp = cast<BranchOpInterface>(op);
+    auto operandNumber = opOperand.getOperandNumber();
+
+    // Gather aliasing block arguments of blocks to which this op may branch to.
+    for (const auto &it : llvm::enumerate(op->getSuccessors())) {
+      Block *block = it.value();
+      SuccessorOperands operands = branchOp.getSuccessorOperands(it.index());
+      assert(operands.getProducedOperandCount() == 0 &&
+             "produced operands not supported");
+      if (operands.getForwardedOperands().empty())
+        continue;
+      // The first and last operands that are forwarded to this successor.
+      int64_t firstOperandIndex =
+          operands.getForwardedOperands().getBeginOperandIndex();
+      int64_t lastOperandIndex =
+          firstOperandIndex + operands.getForwardedOperands().size();
+      bool matchingDestination = operandNumber >= firstOperandIndex &&
+                                 operandNumber < lastOperandIndex;
+      // A branch op may have multiple successors. Find the ones that correspond
+      // to this OpOperand. (There is usually only one.)
+      if (!matchingDestination)
+        continue;
+      // Compute the matching block argument of the destination block.
+      BlockArgument bbArg =
+          block->getArgument(operandNumber - firstOperandIndex);
+      result.addAlias(
+          {bbArg, BufferRelation::Equivalent, /*isDefinite=*/false});
+    }
+
+    return result;
+  }
+};
+
+} // namespace bufferization
+} // namespace mlir
 
 #endif // MLIR_DIALECT_BUFFERIZATION_IR_BUFFERIZABLEOPINTERFACE_H_

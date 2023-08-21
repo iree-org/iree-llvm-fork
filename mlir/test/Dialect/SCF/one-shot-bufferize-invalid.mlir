@@ -17,10 +17,10 @@ func.func @inconsistent_memory_space_scf_if(%c: i1) -> tensor<10xf32> {
 
 // -----
 
-func.func @execute_region_multiple_blocks(%t: tensor<5xf32>) -> tensor<5xf32> {
-  // expected-error @below{{op or BufferizableOpInterface implementation does not support unstructured control flow, but at least one region has multiple blocks}}
+func.func @execute_region_multiple_yields(%t: tensor<5xf32>) -> tensor<5xf32> {
+  // expected-error @below{{op op without unique scf.yield is not supported}}
   %0 = scf.execute_region -> tensor<5xf32> {
-    cf.br ^bb1(%t : tensor<5xf32>)
+    scf.yield %t : tensor<5xf32>
   ^bb1(%arg1 : tensor<5xf32>):
     scf.yield %arg1 : tensor<5xf32>
   }

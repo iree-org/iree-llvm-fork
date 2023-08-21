@@ -319,16 +319,39 @@ struct ReturnOpInterface
 };
 
 struct FuncOpInterface
-    : public BufferizableOpInterface::ExternalModel<FuncOpInterface, FuncOp> {
+    : public OpWithUnstructuredControlFlowBufferizableOpInterfaceExternalModel<
+          FuncOpInterface, FuncOp> {
+
+  static bool supportsUnstructuredControlFlow() { return true; }
+
   FailureOr<BaseMemRefType>
   getBufferType(Operation *op, Value value, const BufferizationOptions &options,
                 SmallVector<Value> &invocationStack) const {
     auto funcOp = cast<FuncOp>(op);
     auto bbArg = cast<BlockArgument>(value);
-    // Unstructured control flow is not supported.
-    assert(bbArg.getOwner() == &funcOp.getBody().front() &&
-           "expected that block argument belongs to first block");
-    return getBufferizedFunctionArgType(funcOp, bbArg.getArgNumber(), options);
+
+    // Function arguments are special.
+    if (bbArg.getOwner() == &funcOp.getBody().front())
+      return getBufferizedFunctionArgType(funcOp, bbArg.getArgNumber(),
+                                          options);
+
+    return OpWithUnstructuredControlFlowBufferizableOpInterfaceExternalModel::
+        getBufferType(op, value, options, invocationStack);
+  }
+
+  LogicalResult verifyAnalysis(Operation *op,
+                               const AnalysisState &state) const {
+    auto funcOp = cast<func::FuncOp>(op);
+    // TODO: func.func with multiple returns are not supported.
+    if (!getAssumedUniqueReturnOp(funcOp) && !funcOp.getBody().empty())
+      return op->emitOpError("op without unique func.return is not supported");
+    const auto &options =
+        static_cast<const OneShotBufferizationOptions &>(state.getOptions());
+    // allow-return-allocs is required for ops with multiple blocks.
+    if (options.allowReturnAllocs || funcOp.getRegion().getBlocks().size() <= 1)
+      return success();
+    return op->emitOpError(
+        "op cannot be bufferized without allow-return-allocs");
   }
 
   /// Rewrite function bbArgs and return values into buffer form. This function
@@ -419,6 +442,11 @@ struct FuncOpInterface
     auto funcOp = cast<FuncOp>(op);
     BlockArgument bbArg = dyn_cast<BlockArgument>(value);
     assert(bbArg && "expected BlockArgument");
+
+    // Non-entry block arguments are always writable. (They may alias with
+    // values that are not writable, which will turn them into read-only.)
+    if (bbArg.getOwner() != &funcOp.getBody().front())
+      return true;
 
     // "bufferization.writable" overrides other writability decisions. This is
     // currently used for testing only.
