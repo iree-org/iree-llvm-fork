@@ -968,10 +968,21 @@ computeMemRefRankReductionMask(MemRefType originalType, MemRefType reducedType,
   if (originalType.getRank() == reducedType.getRank())
     return unusedDims;
 
-  for (const auto &dim : llvm::enumerate(sizes))
-    if (auto attr = llvm::dyn_cast_if_present<Attribute>(dim.value()))
-      if (llvm::cast<IntegerAttr>(attr).getInt() == 1)
-        unusedDims.set(dim.index());
+  ArrayRef<int64_t> reducedShape = reducedType.getShape();
+  size_t reducedShapePos = reducedShape.size();
+  for (size_t ri = 0, re = sizes.size(); ri < re; ++ri) {
+    size_t index = sizes.size() - 1 - ri;
+    OpFoldResult dim = sizes[index];
+    if (auto attr = llvm::dyn_cast_if_present<Attribute>(dim)) {
+      if (llvm::cast<IntegerAttr>(attr).getInt() == 1) {
+        if (!(reducedShapePos > 0 && reducedShape[reducedShapePos - 1] == 1)) {
+          unusedDims.set(index);
+          continue;
+        }
+      }
+    }
+    reducedShapePos--;
+  }
 
   // Early exit for the case where the number of unused dims matches the number
   // of ranks reduced.
