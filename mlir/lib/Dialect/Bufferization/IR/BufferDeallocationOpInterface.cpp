@@ -134,12 +134,11 @@ void DeallocationState::getLiveMemrefsIn(Block *block, SmallVectorImpl<Value> &m
 }
 
 std::pair<Value, Value>
-DeallocationState::getMemrefWithUniqueOwnership(OpBuilder &builder,
-                                                 Value memref) {
-  assert(ownershipMap.count({memref, memref.getParentBlock()}) &&
+DeallocationState::getMemrefWithUniqueOwnership(OpBuilder &builder, Value memref, Block *block) {
+  assert(ownershipMap.count({memref, block}) &&
          "Value must already have been registered in the ownership map");
 
-  Ownership ownership = ownershipMap[{memref, memref.getParentBlock()}];
+  Ownership ownership = ownershipMap[{memref, block}];
   if (ownership.isUnique())
     return {memref, ownership.getIndicator()};
 
