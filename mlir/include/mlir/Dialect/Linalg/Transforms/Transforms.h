@@ -1540,9 +1540,10 @@ void populateInlineConstantOperandsPatterns(RewritePatternSet &patterns);
 /// Patterns that are used to bubble up extract slice op above linalg op.
 void populateBubbleUpExtractSliceOpPatterns(RewritePatternSet &patterns);
 
-/// Adds patterns that waps tensor.extract_slice(linalg.fill(%cst, %init)) into
-/// linalg.fill(%cst, tensor.extract_slice(%init)).
-void populateSwapExtractSliceWithFillPatterns(RewritePatternSet &patterns);
+/// Adds patterns that fold `linalg.fill` operations with its consumers.
+/// Currently folds it with consumers that are `tensor.extract_slice` (if only
+/// use) and `tensor.collapse/expand_shape` operations.
+void populateFoldLinalgFillPatterns(RewritePatternSet &patterns);
 
 /// Patterns to apply `splitReduction` below.
 void populateSplitReductionPattern(

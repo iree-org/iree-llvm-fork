@@ -35,7 +35,32 @@ struct SwapExtractSliceOfFill final
   }
 };
 
-void mlir::linalg::populateSwapExtractSliceWithFillPatterns(
-    RewritePatternSet &patterns) {
-  patterns.add<SwapExtractSliceOfFill>(patterns.getContext());
+/// Fold `tensor.expand/collapse_shape(linalg.fill(%val, %init))` to
+/// `linalg.fill(%val, tensor.expand/collapse_shape(%init))`.
+template <typename T>
+struct SwapTensorShapeChangePatternsWithFillOp final
+    : public OpRewritePattern<T> {
+  using OpRewritePattern<T>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(T reshapeOp,
+                                PatternRewriter &rewriter) const override {
+    auto fillOp = reshapeOp->getOperand(0).template getDefiningOp<FillOp>();
+    if (!fillOp) {
+      return failure();
+    }
+    auto reshapeInitOp =
+        rewriter.create<T>(reshapeOp.getLoc(), reshapeOp.getResult().getType(),
+                           fillOp.getDpsInitOperand(0)->get(),
+                           reshapeOp.getReassociationIndices());
+    rewriter.replaceOpWithNewOp<linalg::FillOp>(reshapeOp, fillOp.getInputs(),
+                                                reshapeInitOp.getResult());
+    return success();
+  }
+};
+
+void mlir::linalg::populateFoldLinalgFillPatterns(RewritePatternSet &patterns) {
+  patterns.add<SwapExtractSliceOfFill,
+               SwapTensorShapeChangePatternsWithFillOp<tensor::CollapseShapeOp>,
+               SwapTensorShapeChangePatternsWithFillOp<tensor::ExpandShapeOp>>(
+      patterns.getContext());
 }

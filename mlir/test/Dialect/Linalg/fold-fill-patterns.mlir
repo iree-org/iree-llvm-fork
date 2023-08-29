@@ -1,4 +1,4 @@
-//RUN: mlir-opt -split-input-file -test-linalg-transform-patterns=test-swap-extract-slice-with-fill-pattern %s | FileCheck %s
+//RUN: mlir-opt -split-input-file -test-linalg-transform-patterns=test-fold-linalg-fill-patterns %s | FileCheck %s
 
 // CHECK-LABEL: func.func @swap_fill_insert_slice
 //  CHECK-SAME: (%[[INIT:.+]]: tensor<?x?x?xf32>, %[[OFFSET0:.+]]: index, %[[SIZE1:.+]]: index)
@@ -26,3 +26,29 @@ func.func @dont_swap_fill_insert_slice_multi_user(%init : tensor<?x?x?xf32>, %of
     : tensor<?x?x?xf32> to tensor<2x?x6xf32>
   return %0, %1: tensor<?x?x?xf32>, tensor<2x?x6xf32>
 }
+
+// -----
+
+func.func @fold_fill_with_collapse_shape(%cst : f32, %init : tensor<?x?x?x?x?xf32>) -> tensor<?x?xf32> {
+  %0 = linalg.fill ins(%cst : f32) outs(%init : tensor<?x?x?x?x?xf32>) -> tensor<?x?x?x?x?xf32>
+  %1 = tensor.collapse_shape %0 [[0, 1, 2], [3, 4]] : tensor<?x?x?x?x?xf32> into tensor<?x?xf32>
+  return %1 : tensor<?x?xf32>
+}
+// CHECK-LABEL: func @fold_fill_with_collapse_shape
+//  CHECK-SAME:     %[[INIT:[a-zA-Z0-9]+]]: tensor<?x?x?x?x?xf32>
+//       CHECK:   %[[INIT_COLLAPSE:.+]] = tensor.collapse_shape %[[INIT]]
+//       CHECK:   %[[FILL:.+]] = linalg.fill
+//  CHECK-SAME:       outs(%[[INIT_COLLAPSE]] :
+
+// -----
+
+func.func @fold_fill_with_expand_shape(%cst : f32, %init : tensor<?x?xf32>) -> tensor<?x2x3x?x4xf32> {
+  %0 = linalg.fill ins(%cst : f32) outs(%init : tensor<?x?xf32>) -> tensor<?x?xf32>
+  %1 = tensor.expand_shape %0 [[0, 1], [2, 3, 4]] : tensor<?x?xf32> into tensor<?x2x3x?x4xf32>
+  return %1 : tensor<?x2x3x?x4xf32>
+}
+// CHECK-LABEL: func @fold_fill_with_expand_shape
+//  CHECK-SAME:     %[[INIT:[a-zA-Z0-9]+]]: tensor<?x?xf32>
+//       CHECK:   %[[INIT_EXPAND:.+]] = tensor.expand_shape %[[INIT]]
+//       CHECK:   %[[FILL:.+]] = linalg.fill
+//  CHECK-SAME:       outs(%[[INIT_EXPAND]] :

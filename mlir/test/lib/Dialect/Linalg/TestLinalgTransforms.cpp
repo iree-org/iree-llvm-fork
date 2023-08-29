@@ -110,10 +110,10 @@ struct TestLinalgTransforms
       llvm::cl::desc("Test rewrite of linalgOp + extract_slice into "
                      "extract_slice + linalgOp"),
       llvm::cl::init(false)};
-  Option<bool> testSwapExtractSliceWithFill{
-      *this, "test-swap-extract-slice-with-fill-pattern",
+  Option<bool> testFoldLinalgFillPatterns{
+      *this, "test-fold-linalg-fill-patterns",
       llvm::cl::desc(
-          "Test patterns to swap tensor.extract_slice(linalg.fill())"),
+          "Test patterns to fold linalg.fill with tensor operations"),
       llvm::cl::init(false)};
   Option<bool> testEraseUnusedOperandsAndResults{
       *this, "test-erase-unused-operands-and-results",
@@ -191,7 +191,7 @@ static void applyBubbleUpExtractSliceOpPattern(func::FuncOp funcOp) {
 
 static void applySwapExtractSliceWithFillPattern(func::FuncOp funcOp) {
   RewritePatternSet patterns(funcOp.getContext());
-  populateSwapExtractSliceWithFillPatterns(patterns);
+  populateFoldLinalgFillPatterns(patterns);
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
@@ -225,7 +225,7 @@ void TestLinalgTransforms::runOnOperation() {
     return applyExtractSliceOfPadTensorSwapPattern(getOperation());
   if (testBubbleUpExtractSliceOpPattern)
     return applyBubbleUpExtractSliceOpPattern(getOperation());
-  if (testSwapExtractSliceWithFill)
+  if (testFoldLinalgFillPatterns)
     return applySwapExtractSliceWithFillPattern(getOperation());
   if (testEraseUnusedOperandsAndResults)
     return applyEraseUnusedOperandsAndResultsPatterns(getOperation());
