@@ -85,7 +85,19 @@ def BufferDeallocation : Pass<"buffer-deallocation", "func::FuncOp"> {
     ```
 
   }];
+  let options = [
+    Option<"privateFuncDynamicOwnership", "private-function-dynamic-ownership",
+           "bool", /*default=*/"false",
+           "Allows to add additional arguments to private functions to "
+           "dynamically pass ownership of memrefs to callees. This can enable "
+           "earlier deallocations.">,
+  ];
   let constructor = "mlir::bufferization::createBufferDeallocationPass()";
+
+  let dependentDialects = [
+    "mlir::bufferization::BufferizationDialect", "mlir::arith::ArithDialect",
+    "mlir::memref::MemRefDialect", "mlir::scf::SCFDialect"
+  ];
 }
 
 def BufferDeallocationSimplification :

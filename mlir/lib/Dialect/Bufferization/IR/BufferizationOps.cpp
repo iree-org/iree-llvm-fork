@@ -777,6 +777,10 @@ struct DeallocRemoveDuplicateDeallocMemrefs
     : public OpRewritePattern<DeallocOp> {
   using OpRewritePattern<DeallocOp>::OpRewritePattern;
 
+  void initialize() {
+    setDebugName("bufferization-dealloc-remove-duplicate-dealloc-memrefs");
+  }
+
   LogicalResult matchAndRewrite(DeallocOp deallocOp,
                                 PatternRewriter &rewriter) const override {
     // Unique memrefs to be deallocated.
@@ -818,6 +822,10 @@ struct DeallocRemoveDuplicateDeallocMemrefs
 struct DeallocRemoveDuplicateRetainedMemrefs
     : public OpRewritePattern<DeallocOp> {
   using OpRewritePattern<DeallocOp>::OpRewritePattern;
+
+  void initialize() {
+    setDebugName("bufferization-dealloc-remove-duplicate-retained-memrefs");
+  }
 
   LogicalResult matchAndRewrite(DeallocOp deallocOp,
                                 PatternRewriter &rewriter) const override {
@@ -864,6 +872,8 @@ struct DeallocRemoveDuplicateRetainedMemrefs
 struct EraseEmptyDealloc : public OpRewritePattern<DeallocOp> {
   using OpRewritePattern<DeallocOp>::OpRewritePattern;
 
+  void initialize() { setDebugName("bufferization-erase-empty-dealloc"); }
+
   LogicalResult matchAndRewrite(DeallocOp deallocOp,
                                 PatternRewriter &rewriter) const override {
     if (deallocOp.getMemrefs().empty()) {
@@ -892,6 +902,10 @@ struct EraseEmptyDealloc : public OpRewritePattern<DeallocOp> {
 /// ```
 struct EraseAlwaysFalseDealloc : public OpRewritePattern<DeallocOp> {
   using OpRewritePattern<DeallocOp>::OpRewritePattern;
+
+  void initialize() {
+    setDebugName("bufferization-erase-always-false-dealloc");
+  }
 
   LogicalResult matchAndRewrite(DeallocOp deallocOp,
                                 PatternRewriter &rewriter) const override {
@@ -929,6 +943,10 @@ struct EraseAlwaysFalseDealloc : public OpRewritePattern<DeallocOp> {
 /// ```
 struct SkipExtractMetadataOfAlloc : public OpRewritePattern<DeallocOp> {
   using OpRewritePattern<DeallocOp>::OpRewritePattern;
+
+  void initialize() {
+    setDebugName("bufferization-skip-extract-metadata-of-alloc");
+  }
 
   LogicalResult matchAndRewrite(DeallocOp deallocOp,
                                 PatternRewriter &rewriter) const override {

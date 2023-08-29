@@ -5,6 +5,7 @@
 
 namespace mlir {
 class ModuleOp;
+class FunctionOpInterface;
 
 namespace func {
 class FuncOp;
@@ -30,7 +31,8 @@ std::unique_ptr<Pass> createBufferDeallocationPass();
 std::unique_ptr<Pass> createBufferDeallocationSimplificationPass();
 
 /// Run buffer deallocation.
-LogicalResult deallocateBuffers(Operation *op);
+LogicalResult deallocateBuffers(FunctionOpInterface op,
+                                bool privateFuncDynamicOwnership);
 
 /// Creates a pass that moves allocations upwards to reduce the number of
 /// required copies that are inserted during the BufferDeallocation pass.
