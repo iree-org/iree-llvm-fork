@@ -6,6 +6,9 @@
 namespace mlir {
 class ModuleOp;
 class FunctionOpInterface;
+class RewritePatternSet;
+class OpBuilder;
+class SymbolTable;
 
 namespace func {
 class FuncOp;
@@ -29,6 +32,20 @@ std::unique_ptr<Pass> createBufferDeallocationPass();
 /// example, it reduces the number of alias checks needed at runtime using
 /// static alias analysis.
 std::unique_ptr<Pass> createBufferDeallocationSimplificationPass();
+
+/// Creates an instance of the LowerDeallocations pass to lower
+/// `bufferization.dealloc` operations to the `memref` dialect.
+std::unique_ptr<Pass> createLowerDeallocationsPass();
+
+/// Adds the conversion pattern of the `bufferization.dealloc` operation to the
+/// given pattern set for use in other transformation passes.
+void populateBufferizationDeallocLoweringPattern(
+    RewritePatternSet &patterns, func::FuncOp deallocLibraryFunc);
+
+/// Construct the library function needed for the fully generic
+/// `bufferization.dealloc` lowering implemented in the LowerDeallocations pass.
+func::FuncOp buildDeallocationLibraryFunction(OpBuilder &builder, Location loc,
+                                              SymbolTable &symbolTable);
 
 /// Run buffer deallocation.
 LogicalResult deallocateBuffers(FunctionOpInterface op,
