@@ -581,6 +581,14 @@ template <>
 struct VectorToScalarMapper<LLVM::vector_reduce_fminimum> {
   using Type = LLVM::MinimumOp;
 };
+template <>
+struct VectorToScalarMapper<LLVM::vector_reduce_fmax> {
+  using Type = LLVM::MaxNumOp;
+};
+template <>
+struct VectorToScalarMapper<LLVM::vector_reduce_fmin> {
+  using Type = LLVM::MinNumOp;
+};
 } // namespace
 
 template <class LLVMRedIntrinOp>
@@ -819,6 +827,12 @@ public:
       result =
           createFPReductionComparisonOpLowering<LLVM::vector_reduce_fmaximum>(
               rewriter, loc, llvmType, operand, acc);
+    } else if (kind == vector::CombiningKind::MINF) {
+      result = createFPReductionComparisonOpLowering<LLVM::vector_reduce_fmin>(
+          rewriter, loc, llvmType, operand, acc);
+    } else if (kind == vector::CombiningKind::MAXF) {
+      result = createFPReductionComparisonOpLowering<LLVM::vector_reduce_fmax>(
+          rewriter, loc, llvmType, operand, acc);
     } else
       return failure();
 
@@ -929,15 +943,11 @@ public:
           rewriter, loc, llvmType, operand, acc, maskOp.getMask());
       break;
     case vector::CombiningKind::MINF:
-      // FIXME: MLIR's 'minf' and LLVM's 'vector_reduce_fmin' do not handle
-      // NaNs/-0.0/+0.0 in the same way.
       result = lowerReductionWithStartValue<LLVM::VPReduceFMinOp,
                                             ReductionNeutralFPMax>(
           rewriter, loc, llvmType, operand, acc, maskOp.getMask());
       break;
     case vector::CombiningKind::MAXF:
-      // FIXME: MLIR's 'minf' and LLVM's 'vector_reduce_fmin' do not handle
-      // NaNs/-0.0/+0.0 in the same way.
       result = lowerReductionWithStartValue<LLVM::VPReduceFMaxOp,
                                             ReductionNeutralFPMin>(
           rewriter, loc, llvmType, operand, acc, maskOp.getMask());
